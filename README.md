@@ -1,30 +1,32 @@
 # local-voice
 
-**Local text-to-speech for your terminal and AI agents.**
+**Local text-to-speech for your terminal and AI agents. Zero latency. Zero cloud. Zero compromise.**
 
-Run open-source TTS models 100% offline. Speak text from the command line, expose voices to Claude and other AI agents via MCP, or use the interactive mode to browse and configure engines.
+Run open-source TTS models 100% offline. Speak from the CLI, let Claude narrate its work via MCP, or browse voices in interactive mode. All processing stays on your machine.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.85+-orange.svg)](https://www.rust-lang.org)
-[![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20Linux%20%7C%20Windows-green.svg)](#installation)
+[![CI](https://github.com/Frenkiee/local-voice/actions/workflows/ci.yml/badge.svg)](https://github.com/Frenkiee/local-voice/actions/workflows/ci.yml)
+[![Release](https://github.com/Frenkiee/local-voice/releases/latest/badge.svg)](https://github.com/Frenkiee/local-voice/releases/latest)
 
 ## Features
 
-- **4 TTS engines** with different strengths:
+| Engine | Params | Quality | Speed | Languages |
+|--------|--------|---------|-------|-----------|
+| **Supertonic** | 66M | High | 167x realtime | en, ko, es, pt, fr |
+| **Kokoro** | 82M | Near-human | Fast | Multi (26 voices) |
+| **Piper** | ~15M | Good | Fastest | 20+ languages |
+| **Chatterbox** | 500M | Best | Slow | en (voice cloning) |
 
-  | Engine | Params | Quality | Speed | Languages |
-  |--------|--------|---------|-------|-----------|
-  | **Kokoro** | 82M | Near-human | Fast | Multi (26 voices) |
-  | **Supertonic** | 66M | High | 167x realtime | en, ko, es, pt, fr |
-  | **Piper** | ~15M | Good | Fastest | 20+ languages |
-  | **Chatterbox** | 500M | Best | Slow | en (voice cloning) |
-
-- **MCP server** for Claude Desktop, Claude Code, and any MCP-compatible agent
-- **Interactive mode** with menu-driven voice/engine selection
+- **MCP server** — 6 tools for Claude Desktop, Claude Code, and any MCP-compatible agent
+- **Audio queue** — speak requests return instantly, audio plays sequentially in the background
+- **Interactive mode** — menu-driven voice/engine/speed selection
 - **Cross-platform** — macOS, Linux (apt/dnf/pacman/zypper/apk/nix), Windows (choco/scoop/winget)
-- **Fully offline** — no cloud, no API keys, no data leaves your machine
 
-## Quick Start
+---
+
+## Installation
+
+### From source (recommended)
 
 ```bash
 git clone https://github.com/Frenkiee/local-voice.git
@@ -32,104 +34,134 @@ cd local-voice
 make install
 ```
 
-This installs dependencies (Rust, espeak-ng), builds the binary, and configures the MCP server for Claude.
+This single command:
+1. Installs dependencies (Rust, espeak-ng) via your package manager
+2. Builds the release binary → `/usr/local/bin/local-voice`
+3. Configures MCP server globally for **Claude Desktop** and **Claude Code**
+4. Downloads the **Supertonic** model (~263 MB)
+5. Sets default voice to **F2** at **1.1x** speed
 
-Then:
+| OS | Package Managers Supported |
+|----|---------------------------|
+| macOS | Homebrew, MacPorts |
+| Linux | apt, dnf, pacman, zypper, apk, nix |
+| Windows | choco, scoop, winget |
+
+### From GitHub releases
+
+Download a pre-built binary from the [latest release](https://github.com/Frenkiee/local-voice/releases/latest):
 
 ```bash
-# Install a model
-local-voice models install kokoro-q8f16      # 114 MB, recommended
-local-voice models install supertonic        # 263 MB, fastest
+# macOS (Apple Silicon)
+curl -L https://github.com/Frenkiee/local-voice/releases/latest/download/local-voice-macos-arm64.tar.gz | tar xz
+sudo mv local-voice /usr/local/bin/
 
-# Speak
-local-voice speak "Hello world"
+# Linux (x86_64)
+curl -L https://github.com/Frenkiee/local-voice/releases/latest/download/local-voice-linux-x86_64.tar.gz | tar xz
+sudo mv local-voice /usr/local/bin/
 
-# Interactive mode
-local-voice
+# Windows (x86_64) — download .zip from releases page
 ```
 
-## Installation
+> **Note:** Pre-built binaries require `espeak-ng` installed separately. On macOS: `brew install espeak-ng`, on Linux: `sudo apt install espeak-ng`.
 
-### One-line install (macOS / Linux / Windows)
+Then install a model and configure MCP manually (see [MCP Server](#mcp-server) below).
 
-```bash
-make install
-```
-
-The Makefile auto-detects your OS and package manager:
-
-| OS | Package Manager | What gets installed |
-|----|-----------------|---------------------|
-| macOS | Homebrew / MacPorts | `espeak-ng`, Rust via rustup |
-| Linux | apt / dnf / pacman / zypper / apk / nix | `espeak-ng`, Rust via rustup |
-| Windows | choco / scoop / winget | `espeak-ng`, Rust via rustup |
-
-The binary is installed to `/usr/local/bin/local-voice` (or `%USERPROFILE%\.local-voice\bin` on Windows).
-
-### Manual install
+### Manual build
 
 ```bash
-# Prerequisites: Rust (1.85+), espeak-ng
+# Prerequisites: Rust 1.85+, espeak-ng
 cargo build --release
-cp target/release/local-voice /usr/local/bin/
+sudo cp target/release/local-voice /usr/local/bin/
 ```
 
 ### Uninstall
 
 ```bash
-make uninstall
+make uninstall    # removes binary + MCP config
 ```
+
+---
+
+## Teaching Your Agent to Speak
+
+After installation, the MCP server is ready. To make Claude use it **proactively** (not just when asked), add a memory file:
+
+**Claude Code** — save to `~/.claude/projects/<your-project>/memory/feedback_speak.md`:
+
+```markdown
+---
+name: Speak when done
+description: Use TTS to announce task starts, agent dispatches, and completions
+type: feedback
+---
+
+Use `mcp__local-voice__speak` throughout your workflow:
+
+1. **Before starting a task** — quick notice of what you're about to do
+2. **When dispatching agents** — say how many agents and what they're doing
+3. **When an agent finishes** — brief result summary
+4. **When a task is complete** — explain what was done in 1-2 sentences
+5. **When user needs to take action** — restart server, rebuild, install deps, etc.
+
+Keep it short — 1-2 sentences max per call.
+```
+
+**Claude Desktop** — add the instruction to your system prompt or project instructions.
+
+This turns Claude into a voice-narrated assistant. Step away from the screen and still know what's happening.
+
+---
 
 ## Usage
 
-### Speaking text
+### Speak
 
 ```bash
 local-voice speak "Hello, how are you today?"
-local-voice speak "Fast speech" --speed 1.5
+local-voice speak "Fast speech" -s 1.5
 local-voice speak "Different voice" --voice F1
-local-voice speak "Save to file" --output hello.wav
+local-voice speak "Save to file" -o hello.wav
 local-voice speak "Kokoro voice" --voice af_alloy -e kokoro
 ```
 
-### Managing models
+### Models
 
 ```bash
-local-voice models list                    # show all available models
+local-voice models list                    # browse all available models
 local-voice models install kokoro-q8f16    # download and install
-local-voice models install supertonic      # install Supertonic engine
-local-voice models default supertonic      # set as default
+local-voice models default supertonic      # set as default (also sets engine)
 local-voice models remove kokoro-fp32      # remove a model
 ```
 
-### Managing voices
+### Voices
 
-Engines like Kokoro (26 voices) and Supertonic (10 voices) support multiple voices per model:
+Kokoro has 26 voices, Supertonic has 10. Each is a small download on top of the base model:
 
 ```bash
-local-voice voices list                    # show all voices
+local-voice voices list                    # show all voices with install status
 local-voice voices list -e kokoro          # filter by engine
-local-voice voices install bf_emma         # install a Kokoro voice
-local-voice voices install M2              # install a Supertonic voice
-local-voice voices default F1              # set default voice
+local-voice voices install bf_emma         # install a Kokoro voice (~1 MB)
+local-voice voices install M2              # install a Supertonic voice (~420 KB)
+local-voice voices default F1              # set default (also sets engine)
 ```
 
-### Configuration
+### Config
 
 ```bash
 local-voice config show                    # view current settings
-local-voice config set speed 1.2           # set speech speed
-local-voice config set engine supertonic   # set default engine
-local-voice config set voice af_alloy      # set default voice
-local-voice config set model kokoro-q8f16  # set default model
+local-voice config set speed 1.2           # set speech speed (auto-routes to active engine)
 local-voice config set steps 10            # supertonic denoising steps
-local-voice config paths                   # show file locations
-local-voice config auto-detect             # auto-pick best engine for your hardware
+local-voice config set engine kokoro       # switch engine
+local-voice config set voice af_alloy      # switch voice (auto-sets engine)
+local-voice config set model kokoro-q8f16  # switch model (auto-sets engine)
+local-voice config paths                   # show config + model file locations
+local-voice config auto-detect             # pick best engine for your hardware
 ```
 
 ### Interactive mode
 
-Run `local-voice` with no arguments for a menu-driven interface:
+Run with no arguments:
 
 ```
 $ local-voice
@@ -137,7 +169,7 @@ $ local-voice
   local-voice v0.1.0
   Local TTS — speak text with AI voices
 
-  engine: supertonic  voice: F1
+  engine: supertonic  voice: F2
 
 ? What do you want to do?
 > Speak text
@@ -150,34 +182,23 @@ $ local-voice
   Exit
 ```
 
-### Hardware diagnostics
+### Doctor
 
 ```bash
-local-voice doctor                         # show hardware + recommendations
+local-voice doctor                         # hardware profile + engine recommendations
 ```
+
+---
 
 ## MCP Server
 
-local-voice includes a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI agents speak text aloud.
+local-voice includes a built-in [MCP](https://modelcontextprotocol.io/) server with 6 tools. `make install` configures it automatically for both Claude Desktop and Claude Code.
 
-### Setup
+### Manual MCP setup
 
-`make install` automatically configures MCP for both Claude Desktop and Claude Code. To configure manually:
+If you installed from a release binary, add this config manually:
 
-**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
-
-```json
-{
-  "mcpServers": {
-    "local-voice": {
-      "command": "local-voice",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-**Claude Code** (`~/.claude/settings.json`):
+**Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
 {
@@ -190,56 +211,47 @@ local-voice includes a built-in [MCP](https://modelcontextprotocol.io/) server t
 }
 ```
 
-### MCP Tools
+**Claude Code** — `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "local-voice": {
+      "command": "local-voice",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+### Tools
 
 | Tool | Description |
 |------|-------------|
-| `speak` | Speak text aloud (uses configured engine/voice/speed) |
+| `speak` | Speak text aloud — returns immediately, audio queued in background |
 | `set_config` | Change engine, model, voice, or speed |
 | `get_config` | View current TTS configuration |
 | `list_engines` | List available TTS engines |
 | `list_models` | List available and installed models |
 | `list_voices` | List available and installed voices |
 
-### Teaching Your Agent to Speak
-
-To make Claude (or any MCP-compatible agent) use local-voice proactively, add a memory/instruction like this:
-
-```markdown
-Use `mcp__local-voice__speak` throughout your workflow:
-
-1. **Before starting a task** — quick notice of what you're about to do
-2. **When dispatching agents** — say how many agents and what they're doing
-3. **When an agent finishes** — brief result summary
-4. **When a task is complete** — explain what was done in 1-2 sentences
-5. **When user needs to take action** — restart server, rebuild, install deps, etc.
-
-Keep it short and informative — 1-2 sentences max per call.
-```
-
-For **Claude Code**, save this as a memory file at:
-```
-~/.claude/projects/<your-project>/memory/feedback_speak.md
-```
-
-With frontmatter:
-```yaml
 ---
-name: Speak when done
-description: Use TTS to announce task starts, agent dispatches, and completions
-type: feedback
----
-```
-
-For **Claude Desktop**, add the instruction to your system prompt or project instructions.
-
-This turns your agent into a voice-narrated assistant — you can step away from the screen and still know what's happening.
 
 ## Engines
 
+### Supertonic
+
+66M parameter model by [Supertone](https://huggingface.co/Supertone/supertonic). Flow-matching architecture with a 4-model ONNX pipeline. 167x realtime on Apple Silicon. No phonemizer needed — works directly on unicode text.
+
+```bash
+local-voice models install supertonic      # 263 MB
+```
+
+10 voices: `F1`–`F5` (female), `M1`–`M5` (male). Languages: en, ko, es, pt, fr.
+
 ### Kokoro
 
-82M parameter model with 26 high-quality voices. Near-human speech quality, CPU-friendly. Uses espeak-ng for phonemization.
+82M parameter model from [onnx-community](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX). Near-human speech quality with 26 distinct voices. Uses espeak-ng for phonemization.
 
 ```bash
 local-voice models install kokoro-q8f16    # 114 MB (recommended)
@@ -247,72 +259,80 @@ local-voice models install kokoro-fp16     # 163 MB
 local-voice models install kokoro-fp32     # 326 MB (highest quality)
 ```
 
-Voices: `af_alloy`, `af_nova`, `am_adam`, `am_echo`, `bf_alice`, `bm_daniel`, and 20 more.
-
-### Supertonic
-
-66M parameter model by Supertone. Generates speech at 167x realtime on Apple Silicon. Flow-matching architecture with 4-model ONNX pipeline. No phonemizer needed.
-
-```bash
-local-voice models install supertonic      # 263 MB
-```
-
-Voices: `F1`-`F5` (female), `M1`-`M5` (male). Languages: English, Korean, Spanish, Portuguese, French.
+26 voices: American (`af_alloy`, `am_adam`, ...), British (`bf_alice`, `bm_daniel`, ...).
 
 ### Piper
 
-Lightweight models (~15-100MB) that run anywhere. One model per voice/language.
+Lightweight models (~15–100 MB) for maximum language coverage. One model = one voice.
 
 ```bash
-local-voice models install en_US-lessac-medium   # 65 MB
-local-voice models install de_DE-thorsten-medium  # 55 MB
+local-voice models install en_US-lessac-medium    # 65 MB, English
+local-voice models install de_DE-thorsten-medium   # 55 MB, German
 ```
 
-20+ languages including English, German, French, Spanish, Italian, Portuguese, Russian, Chinese, and more.
+20+ languages: en, de, fr, es, it, pt, nl, ru, zh, uk, no, and more.
 
 ### Chatterbox
 
-500M parameter model with voice cloning capability. Best quality but slower, prefers GPU.
+500M parameter model for voice cloning. Pass a reference audio file to clone any voice.
 
 ```bash
-local-voice models install chatterbox-quantized   # 580 MB
+local-voice models install chatterbox-quantized    # 580 MB
 ```
+
+---
 
 ## Development
 
 ```bash
 git clone https://github.com/Frenkiee/local-voice.git
 cd local-voice
-make deps          # install espeak-ng + Rust
-cargo build        # debug build
-cargo build --release  # release build
+make deps                  # install espeak-ng + Rust
+cargo build                # debug build
+cargo build --release      # optimized build
+cargo clippy -- -D warnings  # lint
+cargo fmt --check          # format check
 ```
 
 ### Project structure
 
 ```
 src/
-  main.rs           CLI handlers and interactive mode
-  cli.rs            Clap command definitions
-  config.rs         TOML configuration management
-  mcp.rs            MCP server (JSON-RPC over stdio)
-  audio.rs          Audio playback (rodio) and WAV saving
-  download.rs       Model downloading with progress bars
-  hardware.rs       Hardware detection and engine recommendations
-  phonemize.rs      espeak-ng wrapper for phonemization
+  main.rs              CLI handlers, interactive mode
+  cli.rs               Clap command definitions with rich help
+  config.rs            TOML config management (~/.config/local-voice/config.toml)
+  mcp.rs               MCP server (JSON-RPC over stdio, audio queue)
+  audio.rs             Audio playback (rodio), WAV saving, AudioQueue
+  download.rs          Model downloading with progress bars
+  hardware.rs          Hardware detection and engine recommendations
+  phonemize.rs         espeak-ng wrapper
   engine/
-    mod.rs          TtsEngine trait and EngineKind enum
-    kokoro.rs       Kokoro ONNX inference
-    supertonic.rs   Supertonic 4-model pipeline
-    piper.rs        Piper ONNX inference
-    chatterbox.rs   Chatterbox multi-session inference
+    mod.rs             TtsEngine trait, EngineKind enum, AudioOutput
+    kokoro.rs          Kokoro ONNX inference (single model)
+    supertonic.rs      Supertonic 4-model pipeline (DP → TE → VE → VOC)
+    piper.rs           Piper ONNX inference
+    chatterbox.rs      Chatterbox multi-session inference
   registry/
-    mod.rs          EngineRegistry trait, cross-engine lookups
-    kokoro.rs       Kokoro models/voices/download URLs
-    supertonic.rs   Supertonic models/voices/download URLs
-    piper.rs        Piper models/download URLs
-    chatterbox.rs   Chatterbox models/download URLs
+    mod.rs             EngineRegistry trait, cross-engine lookups
+    kokoro.rs          Kokoro models, 26 voices, HuggingFace URLs
+    supertonic.rs      Supertonic model, 10 voices, HuggingFace URLs
+    piper.rs           Piper 18 models, HuggingFace URLs
+    chatterbox.rs      Chatterbox 2 models, HuggingFace URLs
 ```
+
+### CI/CD
+
+- **CI** runs on every push/PR: `cargo check`, `clippy`, `fmt`, build matrix (macOS, Linux, Windows)
+- **Release** triggered by `git tag v*`: builds binaries for 3 platforms, creates GitHub Release with downloads
+
+### Contributing
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feat/my-feature`)
+3. Make changes, ensure `cargo clippy -- -D warnings` and `cargo fmt --check` pass
+4. Push and open a PR — CI must pass before merge
+
+---
 
 ## License
 
