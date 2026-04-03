@@ -6,7 +6,7 @@ Run open-source TTS models 100% offline. Speak from the CLI, let Claude narrate 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Frenkiee/local-voice/actions/workflows/ci.yml/badge.svg)](https://github.com/Frenkiee/local-voice/actions/workflows/ci.yml)
-[![Release](https://github.com/Frenkiee/local-voice/releases/latest/badge.svg)](https://github.com/Frenkiee/local-voice/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Frenkiee/local-voice)](https://github.com/Frenkiee/local-voice/releases/latest)
 
 ## Features
 
