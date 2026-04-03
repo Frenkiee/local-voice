@@ -166,7 +166,7 @@ fn handle_speak(
         .unwrap_or(true);
 
     if needs_reload {
-        let model_dir = Config::model_path(&voice_id);
+        let model_dir = Config::resolve_model_path(crate::engine::EngineKind::Piper, &voice_id);
         match PiperEngine::load(&model_dir, &voice_id) {
             Ok(e) => *engine = Some(Box::new(e)),
             Err(e) => return tool_error(id, &format!("Failed to load model '{voice_id}': {e}")),
@@ -217,7 +217,7 @@ fn handle_speak(
 }
 
 fn handle_list_voices(id: &Option<Value>) -> Value {
-    let installed = Config::installed_models();
+    let installed = Config::installed_models(None);
     if installed.is_empty() {
         return tool_result(
             id,

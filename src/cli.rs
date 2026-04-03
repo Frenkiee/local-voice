@@ -6,7 +6,7 @@ use std::path::PathBuf;
     name = "local-voice",
     version,
     about = "Local TTS CLI with MCP server — run text-to-speech models locally",
-    long_about = "Install and run open-source TTS models locally.\nExpose them to AI agents via MCP (Model Context Protocol)."
+    long_about = "Install and run open-source TTS models locally.\nMultiple engines: Kokoro (recommended), Piper (lightweight), Chatterbox (voice cloning).\nExpose them to AI agents via MCP (Model Context Protocol)."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -15,13 +15,19 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// List available TTS engines and recommendations
+    Engines {
+        #[command(subcommand)]
+        action: Option<EngineAction>,
+    },
+
     /// Manage TTS models
     Models {
         #[command(subcommand)]
         action: ModelAction,
     },
 
-    /// List available voices for installed models
+    /// List installed voices
     Voices,
 
     /// Speak text using a local TTS model
@@ -29,9 +35,17 @@ pub enum Commands {
         /// Text to speak
         text: String,
 
-        /// Voice/model to use (e.g. en_US-lessac-medium)
+        /// Voice to use (e.g. af_alloy for Kokoro, en_US-lessac-medium for Piper)
         #[arg(short, long)]
         voice: Option<String>,
+
+        /// TTS engine override (kokoro, piper, chatterbox)
+        #[arg(short, long)]
+        engine: Option<String>,
+
+        /// Speech speed multiplier (Kokoro only, default 1.0)
+        #[arg(long)]
+        speed: Option<f32>,
 
         /// Save audio to file instead of playing
         #[arg(short, long)]
@@ -50,6 +64,20 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+
+    /// Show hardware info and recommended engine
+    Doctor,
+}
+
+#[derive(Subcommand)]
+pub enum EngineAction {
+    /// List all engines with status
+    List,
+    /// Show detailed info about an engine
+    Info {
+        /// Engine name (kokoro, piper, chatterbox)
+        engine: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -59,11 +87,14 @@ pub enum ModelAction {
         /// Filter by language (e.g. en, de, fr)
         #[arg(short, long)]
         language: Option<String>,
+        /// Filter by engine (kokoro, piper, chatterbox)
+        #[arg(short, long)]
+        engine: Option<String>,
     },
 
     /// Install a model by ID
     Install {
-        /// Model ID (e.g. en_US-lessac-medium)
+        /// Model ID (e.g. kokoro-q8f16, en_US-lessac-medium)
         id: String,
     },
 
@@ -81,7 +112,7 @@ pub enum ConfigAction {
 
     /// Set a configuration value
     Set {
-        /// Config key (default_voice, output_dir)
+        /// Config key (default_voice, default_engine, output_dir, kokoro.speed, kokoro.default_voice)
         key: String,
         /// Config value
         value: String,
@@ -89,4 +120,7 @@ pub enum ConfigAction {
 
     /// Show model and config file paths
     Paths,
+
+    /// Auto-detect hardware and set recommended engine
+    AutoDetect,
 }
