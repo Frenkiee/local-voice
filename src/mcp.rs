@@ -199,7 +199,7 @@ fn handle_speak(
             format!("piper:{voice_id}")
         }
         EngineKind::Kokoro => {
-            let kokoro_voice = voice.as_deref().unwrap_or(config.kokoro_voice());
+            let kokoro_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
             let models = Config::installed_models(Some(EngineKind::Kokoro));
             let model_id = match models.first() {
                 Some(m) => m.clone(),
@@ -226,7 +226,7 @@ fn handle_speak(
             format!("chatterbox:{model_id}")
         }
         EngineKind::Supertonic => {
-            let st_voice = voice.as_deref().unwrap_or(config.supertonic_voice());
+            let st_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
             let models = Config::installed_models(Some(EngineKind::Supertonic));
             let model_id = match models.first() {
                 Some(m) => m.clone(),
@@ -254,7 +254,7 @@ fn handle_speak(
             EngineKind::Kokoro => {
                 let models = Config::installed_models(Some(EngineKind::Kokoro));
                 let model_id = models.first().unwrap();
-                let kokoro_voice = voice.as_deref().unwrap_or(config.kokoro_voice());
+                let kokoro_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
                 let spd = speed.unwrap_or(config.kokoro_speed());
                 let model_dir = Config::resolve_model_path(EngineKind::Kokoro, model_id);
                 KokoroEngine::load(&model_dir, model_id, kokoro_voice, spd)
@@ -272,7 +272,7 @@ fn handle_speak(
             EngineKind::Supertonic => {
                 let models = Config::installed_models(Some(EngineKind::Supertonic));
                 let model_id = models.first().unwrap();
-                let st_voice = voice.as_deref().unwrap_or(config.supertonic_voice());
+                let st_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
                 let spd = speed.unwrap_or(config.supertonic_speed());
                 let steps = config.supertonic_steps();
                 let model_dir = Config::resolve_model_path(EngineKind::Supertonic, model_id);

@@ -466,7 +466,9 @@ fn handle_speak(
                 )
             })?;
 
-            let kokoro_voice = voice.unwrap_or(config.kokoro_voice());
+            let kokoro_voice = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.kokoro_voice());
             let spd = speed.unwrap_or(config.kokoro_speed());
             let model_dir =
                 Config::resolve_model_path(engine::EngineKind::Kokoro, &model_id);
@@ -512,7 +514,9 @@ fn handle_speak(
                 )
             })?;
 
-            let st_voice = voice.unwrap_or(config.supertonic_voice());
+            let st_voice = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.supertonic_voice());
             let spd = speed.unwrap_or(config.supertonic_speed());
             let steps = config.supertonic_steps();
             let model_dir =
