@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: local-voice-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: local-voice-macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: local-voice-macos-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: local-voice-windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install espeak-ng (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y espeak-ng
+
+      - name: Install espeak-ng (macOS)
+        if: runner.os == 'macOS'
+        run: brew install espeak-ng
+
+      - name: Install espeak-ng (Windows)
+        if: runner.os == 'Windows'
+        run: choco install espeak-ng -y
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/release
+          tar czf ../../${{ matrix.artifact }}.tar.gz local-voice
+          cd ../..
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path target\release\local-voice.exe -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+          if-no-files-found: ignore
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*
