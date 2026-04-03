@@ -8,8 +8,6 @@ use unicode_normalization::UnicodeNormalization;
 use super::{AudioOutput, EngineKind, TtsEngine, VoiceInfo};
 use crate::registry::supertonic::VOICES;
 
-const MAX_TEXT_LEN: usize = 300;
-
 // ── Config structs (from tts.json) ──
 
 #[derive(Deserialize)]
@@ -61,6 +59,7 @@ pub struct SupertonicEngine {
     indexer: Vec<i64>,
     style: Style,
     voice_id: String,
+    #[allow(dead_code)]
     model_id: String,
     model_dir: std::path::PathBuf,
     sample_rate: i32,
@@ -419,80 +418,3 @@ fn flatten_style_component(sc: &StyleComponent) -> Result<(Vec<f32>, [usize; 3])
     Ok((flat, [dims[0], dims[1], dims[2]]))
 }
 
-// ── Text chunking ──
-
-fn chunk_text(text: &str, max_len: usize) -> Vec<String> {
-    let paragraphs: Vec<&str> = text.split("\n\n").collect();
-    let mut chunks = Vec::new();
-
-    for para in paragraphs {
-        let trimmed = para.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if trimmed.len() <= max_len {
-            chunks.push(trimmed.to_string());
-            continue;
-        }
-
-        let sentences = split_sentences(trimmed);
-        let mut current = String::new();
-
-        for sent in sentences {
-            if current.len() + sent.len() + 1 > max_len && !current.is_empty() {
-                chunks.push(current.trim().to_string());
-                current.clear();
-            }
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(&sent);
-        }
-
-        if !current.is_empty() {
-            chunks.push(current.trim().to_string());
-        }
-    }
-
-    if chunks.is_empty() {
-        chunks.push(text.to_string());
-    }
-
-    chunks
-}
-
-fn split_sentences(text: &str) -> Vec<String> {
-    let mut sentences = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-
-    let abbreviations = [
-        "Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr.", "St.",
-        "Ave.", "Rd.", "Blvd.", "Dept.", "Inc.", "Ltd.", "Co.", "Corp.",
-        "etc.", "vs.", "i.e.", "e.g.", "Ph.D.",
-    ];
-
-    let mut i = 0;
-    while i < len {
-        current.push(chars[i]);
-
-        if matches!(chars[i], '.' | '!' | '?') {
-            let is_abbr = abbreviations.iter().any(|a| current.ends_with(a));
-
-            if !is_abbr && (i + 1 >= len || chars[i + 1] == ' ') {
-                sentences.push(current.trim().to_string());
-                current.clear();
-            }
-        }
-
-        i += 1;
-    }
-
-    if !current.is_empty() {
-        sentences.push(current.trim().to_string());
-    }
-
-    sentences
-}

@@ -19,6 +19,7 @@ pub struct DownloadItem {
 pub struct VoiceEntry {
     pub id: &'static str,
     pub name: &'static str,
+    #[allow(dead_code)]
     pub language: &'static str,
     pub gender: &'static str,
 }
@@ -33,6 +34,7 @@ pub struct ModelEntry {
     pub quality: &'static str,
     pub description: &'static str,
     pub size_mb: u32,
+    #[allow(dead_code)]
     pub sample_rate: u32,
 }
 

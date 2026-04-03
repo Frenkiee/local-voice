@@ -20,6 +20,7 @@ pub struct ChatterboxEngine {
     cond_decoder: ort::session::Session,
     tokenizer: tokenizers::Tokenizer,
     reference_audio: Vec<f32>,
+    #[allow(dead_code)]
     model_id: String,
     exaggeration: f32,
 }
@@ -111,7 +112,7 @@ impl ChatterboxEngine {
         }
 
         // Determine hidden_dim from the first embed_tokens run
-        let mut hidden_dim: usize = 0;
+        let mut _hidden_dim: usize = 0;
 
         for i in 0..MAX_NEW_TOKENS {
             // Build embed token inputs
@@ -150,13 +151,13 @@ impl ChatterboxEngine {
                 .with_context(|| "Failed to extract embeddings")?;
 
             let embed_vec = embed_data.to_vec();
-            hidden_dim = *embed_shape.last().unwrap_or(&0) as usize;
+            _hidden_dim = *embed_shape.last().unwrap_or(&0) as usize;
             let mut inputs_embeds = embed_vec;
             let mut seq_len = embed_ids_len;
 
             // Prepend conditioning embedding on first iteration
             if i == 0 {
-                let cond_len = ref_out.cond_emb.len() / hidden_dim;
+                let cond_len = ref_out.cond_emb.len() / _hidden_dim;
                 let mut combined = ref_out.cond_emb.clone();
                 combined.extend_from_slice(&inputs_embeds);
                 inputs_embeds = combined;
@@ -169,7 +170,7 @@ impl ChatterboxEngine {
 
             // Build LLM inputs dynamically using ort inputs
             let embeds_value =
-                Value::from_array(([1usize, seq_len, hidden_dim], inputs_embeds))
+                Value::from_array(([1usize, seq_len, _hidden_dim], inputs_embeds))
                     .with_context(|| "Failed to create inputs_embeds")?;
             let attn_value = Value::from_array(([1usize, total_len], attention_mask))
                 .with_context(|| "Failed to create attention_mask")?;

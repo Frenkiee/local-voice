@@ -84,12 +84,15 @@ pub trait TtsEngine: Send {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput>;
 
     /// Current model/voice identifier
+    #[allow(dead_code)]
     fn model_id(&self) -> &str;
 
     /// Engine type
+    #[allow(dead_code)]
     fn engine_kind(&self) -> EngineKind;
 
     /// List voices this engine can produce (with current model loaded)
+    #[allow(dead_code)]
     fn available_voices(&self) -> Vec<VoiceInfo>;
 
     /// Switch to a different voice without full reload (if supported)

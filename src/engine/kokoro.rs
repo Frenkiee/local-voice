@@ -7,13 +7,12 @@ use crate::phonemize::Phonemizer;
 use crate::registry::kokoro::VOICES;
 use ort::value::Value;
 
-const MAX_PHONEME_LENGTH: usize = 510;
-
 pub struct KokoroEngine {
     session: ort::session::Session,
     vocab: HashMap<String, i64>,
     voice_style: Vec<f32>,
     voice_id: String,
+    #[allow(dead_code)]
     model_id: String,
     model_dir: std::path::PathBuf,
     speed: f32,
@@ -191,31 +190,6 @@ fn load_voice_style(model_dir: &Path, voice_id: &str) -> Result<Vec<f32>> {
     }
 
     Ok(floats)
-}
-
-/// Split phonemes at punctuation boundaries, keeping chunks under max_len
-fn split_phonemes(phonemes: &str, max_len: usize) -> Vec<String> {
-    let parts: Vec<&str> = phonemes.split_inclusive(&['.', '!', '?', ';', ','][..]).collect();
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-
-    for part in parts {
-        if current.len() + part.len() > max_len && !current.is_empty() {
-            chunks.push(current.clone());
-            current.clear();
-        }
-        current.push_str(part);
-    }
-
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-
-    if chunks.is_empty() {
-        chunks.push(phonemes.to_string());
-    }
-
-    chunks
 }
 
 /// Build the Kokoro vocabulary mapping (phoneme char -> token ID)
