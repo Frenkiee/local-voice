@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::num::NonZero;
 use std::path::Path;
+use std::sync::mpsc::{self, SyncSender};
+use std::thread;
 
 use crate::engine::AudioOutput;
 
@@ -21,6 +23,29 @@ pub fn play_audio(audio: &AudioOutput) -> Result<()> {
     player.sleep_until_end();
 
     Ok(())
+}
+
+/// Background audio queue — plays audio sequentially without blocking the caller.
+pub struct AudioQueue {
+    tx: SyncSender<AudioOutput>,
+}
+
+impl AudioQueue {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::sync_channel::<AudioOutput>(16);
+        thread::spawn(move || {
+            while let Ok(audio) = rx.recv() {
+                if let Err(e) = play_audio(&audio) {
+                    eprintln!("[local-voice] Playback error: {e}");
+                }
+            }
+        });
+        Self { tx }
+    }
+
+    pub fn enqueue(&self, audio: AudioOutput) {
+        self.tx.send(audio).ok();
+    }
 }
 
 /// Save audio to a WAV file

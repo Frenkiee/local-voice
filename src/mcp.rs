@@ -17,6 +17,7 @@ pub fn run_server() -> Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut engines: HashMap<String, Box<dyn TtsEngine>> = HashMap::new();
+    let audio_queue = audio::AudioQueue::new();
 
     eprintln!("[local-voice] MCP server starting");
 
@@ -41,7 +42,7 @@ pub fn run_server() -> Result<()> {
             "initialize" => handle_initialize(&id),
             "notifications/initialized" | "initialized" => continue,
             "tools/list" => handle_tools_list(&id),
-            "tools/call" => handle_tools_call(&id, &request, &mut engines),
+            "tools/call" => handle_tools_call(&id, &request, &mut engines, &audio_queue),
             "ping" => json_rpc_result(&id, json!({})),
             _ => {
                 if id.is_some() {
@@ -174,12 +175,13 @@ fn handle_tools_call(
     id: &Option<Value>,
     request: &Value,
     engines: &mut HashMap<String, Box<dyn TtsEngine>>,
+    audio_queue: &audio::AudioQueue,
 ) -> Value {
     let params = &request["params"];
     let tool_name = params["name"].as_str().unwrap_or("");
 
     match tool_name {
-        "speak" => handle_speak(id, params, engines),
+        "speak" => handle_speak(id, params, engines, audio_queue),
         "set_config" => handle_set_config(id, params, engines),
         "get_config" => handle_get_config(id),
         "list_engines" => handle_list_engines(id),
@@ -195,6 +197,7 @@ fn handle_speak(
     id: &Option<Value>,
     params: &Value,
     engines: &mut HashMap<String, Box<dyn TtsEngine>>,
+    audio_queue: &audio::AudioQueue,
 ) -> Value {
     let args = &params["arguments"];
     let text = match args["text"].as_str() {
@@ -233,9 +236,7 @@ fn handle_speak(
 
     match eng.synthesize(text) {
         Ok(audio_output) => {
-            if let Err(e) = audio::play_audio(&audio_output) {
-                return tool_error(id, &format!("Audio playback failed: {e}"));
-            }
+            audio_queue.enqueue(audio_output);
             tool_result(id, &format!("Spoke text using {engine_kind} engine"))
         }
         Err(e) => tool_error(id, &format!("Synthesis failed: {e}")),
