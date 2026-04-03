@@ -109,14 +109,7 @@ impl SupertonicEngine {
         let vector_est_session = load_session("vector_estimator.onnx")?;
         let vocoder_session = load_session("vocoder.onnx")?;
 
-        // Log ONNX model input names for debugging
-        eprintln!("[supertonic] DP inputs: {:?}", dp_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
-        eprintln!("[supertonic] TE inputs: {:?}", text_enc_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
-        eprintln!("[supertonic] VE inputs: {:?}", vector_est_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
-        eprintln!("[supertonic] VOC inputs: {:?}", vocoder_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
-
         let style = load_voice_style(model_dir, voice_id)?;
-        eprintln!("[supertonic] style_ttl shape={:?} len={}, style_dp shape={:?} len={}", style.ttl_shape, style.ttl_data.len(), style.dp_shape, style.dp_data.len());
 
         Ok(Self {
             dp_session,
@@ -252,13 +245,10 @@ impl SupertonicEngine {
         let text_ids_raw = self.tokenize(&processed);
         let text_len = text_ids_raw.len();
 
-        eprintln!("[supertonic] preprocessed: {processed}");
-        eprintln!("[supertonic] text_ids len={text_len}, first 20: {:?}", &text_ids_raw[..text_len.min(20)]);
-
         // Build text_mask: [1, 1, text_len] — all 1s (single batch, no padding)
         let text_mask: Vec<f32> = vec![1.0; text_len];
 
-        // 1. Duration prediction — use NAMED inputs
+        // 1. Duration prediction
         let dp_text_ids = Value::from_array(([1usize, text_len], text_ids_raw.clone()))?;
         let dp_style = Value::from_array((self.style.dp_shape, self.style.dp_data.clone()))?;
         let dp_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
@@ -269,13 +259,10 @@ impl SupertonicEngine {
             "text_mask" => dp_mask
         ])?;
 
-        let (dp_shape, duration_raw) = dp_outputs[0].try_extract_tensor::<f32>()?;
-        let dur_slice = duration_raw.as_ref();
-        eprintln!("[supertonic] duration shape={dp_shape:?}, values={dur_slice:?}");
-        let duration = dur_slice.first().copied().unwrap_or(1.0) / self.speed;
-        eprintln!("[supertonic] duration after speed={duration:.4}s");
+        let (_, duration_raw) = dp_outputs[0].try_extract_tensor::<f32>()?;
+        let duration = duration_raw.as_ref().first().copied().unwrap_or(1.0) / self.speed;
 
-        // 2. Text encoding — use NAMED inputs
+        // 2. Text encoding
         let te_text_ids = Value::from_array(([1usize, text_len], text_ids_raw))?;
         let te_style = Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
         let te_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
@@ -289,7 +276,6 @@ impl SupertonicEngine {
         let (te_shape, text_emb_raw) = te_outputs[0].try_extract_tensor::<f32>()?;
         let text_emb_data = text_emb_raw.to_vec();
         let text_emb_shape = [te_shape[0] as usize, te_shape[1] as usize, te_shape[2] as usize];
-        eprintln!("[supertonic] text_emb shape={text_emb_shape:?}");
 
         // 3. Sample noisy latent
         let chunk_size = self.base_chunk_size * self.chunk_compress_factor;
@@ -297,19 +283,15 @@ impl SupertonicEngine {
         let latent_len = ((wav_len + chunk_size - 1) / chunk_size).max(1) as usize;
         let latent_dim_val = (self.latent_dim * self.chunk_compress_factor) as usize;
 
-        eprintln!("[supertonic] latent: dim={latent_dim_val}, len={latent_len}, wav_len={wav_len}");
-
-        // Use fixed-seed noise for deterministic output
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let normal = rand_distr::Normal::new(0.0f32, 1.0).unwrap();
         let xt_init: Vec<f32> = (0..latent_dim_val * latent_len)
             .map(|_| rand_distr::Distribution::sample(&normal, &mut rng))
             .collect();
 
-        // Latent mask: [1, 1, latent_len]
         let latent_mask: Vec<f32> = vec![1.0; latent_len];
 
-        // 4. Denoising loop — use NAMED inputs
+        // 4. Denoising loop
         let mut xt = xt_init;
         for step in 0..self.total_step {
             let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt.clone()))?;
@@ -330,30 +312,21 @@ impl SupertonicEngine {
                 "total_step" => v_total
             ])?;
 
-            let (ve_shape, denoised_raw) = ve_outputs[0].try_extract_tensor::<f32>()?;
+            let (_, denoised_raw) = ve_outputs[0].try_extract_tensor::<f32>()?;
             xt = denoised_raw.to_vec();
-            let xt_min = xt.iter().cloned().fold(f32::INFINITY, f32::min);
-            let xt_max = xt.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let xt_mean = xt.iter().sum::<f32>() / xt.len() as f32;
-            eprintln!("[supertonic] step {step}/{}: shape={ve_shape:?} min={xt_min:.4} max={xt_max:.4} mean={xt_mean:.6}", self.total_step);
         }
 
-        // 5. Vocoder — use NAMED input
+        // 5. Vocoder
         let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt))?;
         let voc_outputs = self.vocoder_session.run(ort::inputs![
             "latent" => v_latent
         ])?;
 
-        let (voc_shape, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
+        let (_, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
         let mut samples = wav_raw.to_vec();
-        let wav_min = samples.iter().cloned().fold(f32::INFINITY, f32::min);
-        let wav_max = samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let wav_mean = samples.iter().sum::<f32>() / samples.len() as f32;
-        eprintln!("[supertonic] vocoder output shape={voc_shape:?}, samples={}, min={wav_min:.4} max={wav_max:.4} mean={wav_mean:.6}", samples.len());
 
         // Trim to actual duration
         let actual_len = (duration * self.sample_rate as f32) as usize;
-        eprintln!("[supertonic] trimming to {actual_len} samples (from {})", samples.len());
         if actual_len < samples.len() {
             samples.truncate(actual_len);
         }
