@@ -38,29 +38,54 @@ impl EngineRegistry for ChatterboxRegistry {
 
         Ok(vec![
             DownloadItem {
-                url: format!("{HF_BASE}/{lm_file}"),
+                url: format!("{HF_BASE}/onnx/{lm_file}"),
                 dest_relative: PathBuf::from(lm_file),
                 size_hint_mb: Some(lm_size),
             },
             DownloadItem {
-                url: format!("{HF_BASE}/decoder.onnx"),
-                dest_relative: PathBuf::from("decoder.onnx"),
+                url: format!("{HF_BASE}/onnx/{lm_file}_data"),
+                dest_relative: PathBuf::from(format!("{lm_file}_data")),
+                size_hint_mb: Some(lm_size),
+            },
+            DownloadItem {
+                url: format!("{HF_BASE}/onnx/speech_encoder.onnx"),
+                dest_relative: PathBuf::from("speech_encoder.onnx"),
                 size_hint_mb: Some(50),
             },
             DownloadItem {
-                url: format!("{HF_BASE}/ve.onnx"),
-                dest_relative: PathBuf::from("ve.onnx"),
+                url: format!("{HF_BASE}/onnx/speech_encoder.onnx_data"),
+                dest_relative: PathBuf::from("speech_encoder.onnx_data"),
+                size_hint_mb: Some(50),
+            },
+            DownloadItem {
+                url: format!("{HF_BASE}/onnx/embed_tokens.onnx"),
+                dest_relative: PathBuf::from("embed_tokens.onnx"),
                 size_hint_mb: Some(30),
             },
             DownloadItem {
-                url: format!("{HF_BASE}/s2a.onnx"),
-                dest_relative: PathBuf::from("s2a.onnx"),
+                url: format!("{HF_BASE}/onnx/embed_tokens.onnx_data"),
+                dest_relative: PathBuf::from("embed_tokens.onnx_data"),
+                size_hint_mb: Some(30),
+            },
+            DownloadItem {
+                url: format!("{HF_BASE}/onnx/conditional_decoder.onnx"),
+                dest_relative: PathBuf::from("conditional_decoder.onnx"),
                 size_hint_mb: Some(100),
             },
             DownloadItem {
-                url: format!("{HF_BASE}/t3_cfg_rng.onnx"),
-                dest_relative: PathBuf::from("t3_cfg_rng.onnx"),
-                size_hint_mb: Some(50),
+                url: format!("{HF_BASE}/onnx/conditional_decoder.onnx_data"),
+                dest_relative: PathBuf::from("conditional_decoder.onnx_data"),
+                size_hint_mb: Some(100),
+            },
+            DownloadItem {
+                url: format!("{HF_BASE}/tokenizer.json"),
+                dest_relative: PathBuf::from("tokenizer.json"),
+                size_hint_mb: Some(1),
+            },
+            DownloadItem {
+                url: format!("{HF_BASE}/default_voice.wav"),
+                dest_relative: PathBuf::from("default_voice.wav"),
+                size_hint_mb: Some(1),
             },
         ])
     }

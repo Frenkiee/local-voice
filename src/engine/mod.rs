@@ -1,3 +1,4 @@
+pub mod chatterbox;
 pub mod kokoro;
 pub mod piper;
 

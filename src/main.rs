@@ -348,7 +348,28 @@ fn handle_speak(
             )?)
         }
         engine::EngineKind::Chatterbox => {
-            bail!("Chatterbox engine not yet implemented. Use --engine piper for now.")
+            let cb_models = Config::installed_models(Some(engine::EngineKind::Chatterbox));
+            let model_id = cb_models.first().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No Chatterbox model installed. Run: local-voice models install chatterbox-quantized"
+                )
+            })?;
+
+            let model_dir =
+                Config::resolve_model_path(engine::EngineKind::Chatterbox, model_id);
+
+            eprintln!("Speaking with Chatterbox (model: {model_id})...");
+
+            let mut eng = engine::chatterbox::ChatterboxEngine::load(&model_dir, model_id)?;
+
+            // If a voice path was provided, use it for cloning
+            if let Some(v) = voice {
+                if std::path::Path::new(v).exists() {
+                    eng.set_voice(v)?;
+                }
+            }
+
+            Box::new(eng)
         }
     };
 
