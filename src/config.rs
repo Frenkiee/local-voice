@@ -11,6 +11,7 @@ pub struct Config {
     pub output_dir: Option<String>,
     pub kokoro: Option<KokoroConfig>,
     pub chatterbox: Option<ChatterboxConfig>,
+    pub supertonic: Option<SupertonicConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,6 +25,13 @@ pub struct KokoroConfig {
 pub struct ChatterboxConfig {
     pub quantized: Option<bool>,
     pub reference_audio: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SupertonicConfig {
+    pub speed: Option<f32>,
+    pub steps: Option<u32>,
+    pub default_voice: Option<String>,
 }
 
 impl Config {
@@ -157,7 +165,7 @@ impl Config {
                     if path.is_dir() && path.join("model.onnx").exists() {
                         if let Some(name) = entry.file_name().to_str() {
                             // Skip engine subdirectories
-                            if !matches!(name, "kokoro" | "piper" | "chatterbox") && !models.contains(&name.to_string()) {
+                            if !matches!(name, "kokoro" | "piper" | "chatterbox" | "supertonic") && !models.contains(&name.to_string()) {
                                 models.push(name.to_string());
                             }
                         }
@@ -192,6 +200,46 @@ impl Config {
             .and_then(|k| k.default_voice.as_deref())
             .unwrap_or("af_alloy")
     }
+
+    /// Supertonic speed setting
+    pub fn supertonic_speed(&self) -> f32 {
+        self.supertonic
+            .as_ref()
+            .and_then(|s| s.speed)
+            .unwrap_or(1.05)
+    }
+
+    /// Supertonic denoising steps
+    pub fn supertonic_steps(&self) -> u32 {
+        self.supertonic
+            .as_ref()
+            .and_then(|s| s.steps)
+            .unwrap_or(5)
+    }
+
+    /// Supertonic default voice
+    pub fn supertonic_voice(&self) -> &str {
+        self.supertonic
+            .as_ref()
+            .and_then(|s| s.default_voice.as_deref())
+            .unwrap_or("F1")
+    }
+
+    /// List installed voice files for an engine+model combo
+    pub fn installed_voices(engine: EngineKind, model_id: &str) -> Vec<String> {
+        let voices_dir = Self::resolve_model_path(engine, model_id).join("voices");
+        let mut voices = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&voices_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(stem) = name.strip_suffix(".bin").or_else(|| name.strip_suffix(".json")) {
+                        voices.push(stem.to_string());
+                    }
+                }
+            }
+        }
+        voices
+    }
 }
 
 fn has_model_files(dir: &std::path::Path, engine: EngineKind) -> bool {
@@ -204,6 +252,12 @@ fn has_model_files(dir: &std::path::Path, engine: EngineKind) -> bool {
                 && (dir.join("language_model.onnx").exists()
                     || dir.join("language_model_q4.onnx").exists())
         }
+        EngineKind::Supertonic => {
+            dir.join("duration_predictor.onnx").exists()
+                && dir.join("text_encoder.onnx").exists()
+                && dir.join("vector_estimator.onnx").exists()
+                && dir.join("vocoder.onnx").exists()
+        }
     }
 }
 
@@ -212,6 +266,8 @@ fn detect_engine_from_voice(voice: &str) -> Option<EngineKind> {
         Some(EngineKind::Kokoro)
     } else if voice.starts_with("chatterbox") {
         Some(EngineKind::Chatterbox)
+    } else if voice.starts_with("supertonic") {
+        Some(EngineKind::Supertonic)
     } else {
         Some(EngineKind::Piper)
     }

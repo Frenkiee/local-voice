@@ -10,7 +10,7 @@ mod registry;
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction, EngineAction, ModelAction};
+use cli::{Cli, Commands, ConfigAction, EngineAction, ModelAction, VoiceAction};
 use config::Config;
 use engine::TtsEngine;
 use owo_colors::OwoColorize;
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Engines { action } => handle_engines(action)?,
         Commands::Models { action } => handle_models(action).await?,
-        Commands::Voices => handle_voices()?,
+        Commands::Voices { action } => handle_voices(action).await?,
         Commands::Speak {
             text,
             voice,
@@ -96,10 +96,11 @@ fn handle_engines(action: Option<EngineAction>) -> Result<()> {
                 );
             }
 
-            if kind == engine::EngineKind::Kokoro {
+            let voices = registry::voices_for_engine(kind);
+            if !voices.is_empty() {
                 println!();
-                println!("  Available voices (26):");
-                for voice in registry::voices_for_engine(kind) {
+                println!("  Available voices ({}):", voices.len());
+                for voice in voices {
                     println!(
                         "    {:<16} {} ({})",
                         voice.id, voice.name, voice.gender
@@ -246,44 +247,133 @@ async fn handle_models(action: ModelAction) -> Result<()> {
     Ok(())
 }
 
-fn handle_voices() -> Result<()> {
-    let installed = Config::installed_models(None);
-
-    if installed.is_empty() {
-        println!("No voices installed.");
-        println!();
-        println!("Install one:");
-        println!("  local-voice models install kokoro-q8f16");
-        return Ok(());
-    }
-
-    let config = Config::load()?;
-    let default = config.default_voice.as_deref();
-
-    println!();
-    println!("  {}", "Installed voices:".bold());
-    println!();
-    for voice in &installed {
-        let marker = if Some(voice.as_str()) == default {
-            " (default)".green().to_string()
-        } else {
-            String::new()
-        };
-        let info = registry::find_model_any_engine(voice)
-            .map(|(engine_kind, m)| format!(" [{}] — {}", engine_kind, m.description))
-            .unwrap_or_default();
-        println!("    {voice}{marker}{info}");
-    }
-
-    // Show Kokoro voices if a Kokoro model is installed
-    let kokoro_installed = !Config::installed_models(Some(engine::EngineKind::Kokoro)).is_empty();
-    if kokoro_installed {
-        println!();
-        println!("  {} (use with --voice):", "Kokoro voices".bold());
-        let voices = registry::voices_for_engine(engine::EngineKind::Kokoro);
-        for voice in voices {
-            println!("    {:<16} {} ({})", voice.id, voice.name, voice.gender);
+async fn handle_voices(action: Option<VoiceAction>) -> Result<()> {
+    match action {
+        None | Some(VoiceAction::List { engine: None }) => {
+            show_voices_for_engines(engine::EngineKind::all())?;
         }
+        Some(VoiceAction::List { engine: Some(e) }) => {
+            let kind: engine::EngineKind = e.parse()?;
+            show_voices_for_engines(&[kind])?;
+        }
+        Some(VoiceAction::Install { id }) => {
+            let (engine_kind, _voice_entry) =
+                registry::find_voice_any_engine(&id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown voice '{id}'. Run 'local-voice voices list' to see available voices."
+                    )
+                })?;
+
+            // Find installed model for this engine to know where to put the voice
+            let models = Config::installed_models(Some(engine_kind));
+            let model_id = models.first().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No {} model installed. Install one first: local-voice models install {}",
+                    engine_kind,
+                    match engine_kind {
+                        engine::EngineKind::Kokoro => "kokoro-q8f16",
+                        engine::EngineKind::Supertonic => "supertonic",
+                        _ => "<model>",
+                    }
+                )
+            })?;
+
+            let model_dir = Config::resolve_model_path(engine_kind, model_id);
+            let plan = registry::voice_download_plan(&id)?;
+
+            println!(
+                "Installing voice '{}' for {} (model: {model_id})...",
+                id.bold(),
+                engine_kind
+            );
+
+            for item in &plan {
+                let dest = model_dir.join(&item.dest_relative);
+                println!("  Downloading {}...", item.dest_relative.display());
+                download::download_file(&item.url, &dest).await?;
+            }
+
+            println!();
+            println!("{}", format!("✓ Voice '{id}' installed.").green());
+            println!("  Try it: local-voice speak 'Hello!' --voice {id}");
+            println!();
+        }
+        Some(VoiceAction::Remove { id }) => {
+            let (engine_kind, _) =
+                registry::find_voice_any_engine(&id).ok_or_else(|| {
+                    anyhow::anyhow!("Unknown voice '{id}'.")
+                })?;
+
+            let models = Config::installed_models(Some(engine_kind));
+            let model_id = models.first().ok_or_else(|| {
+                anyhow::anyhow!("No {} model installed.", engine_kind)
+            })?;
+
+            let model_dir = Config::resolve_model_path(engine_kind, model_id);
+
+            // Determine voice file extension
+            let voice_file = match engine_kind {
+                engine::EngineKind::Kokoro => model_dir.join("voices").join(format!("{id}.bin")),
+                engine::EngineKind::Supertonic => model_dir.join("voices").join(format!("{id}.json")),
+                _ => bail!("Engine {engine_kind} does not support voice removal."),
+            };
+
+            if !voice_file.exists() {
+                bail!("Voice '{id}' is not installed.");
+            }
+
+            std::fs::remove_file(&voice_file)?;
+            println!("{}", format!("✓ Voice '{id}' removed.").green());
+        }
+    }
+
+    Ok(())
+}
+
+fn show_voices_for_engines(engines: &[engine::EngineKind]) -> Result<()> {
+    let mut any_shown = false;
+
+    for kind in engines {
+        let voices = registry::voices_for_engine(*kind);
+        if voices.is_empty() {
+            continue;
+        }
+
+        let models = Config::installed_models(Some(*kind));
+        let installed_voices: Vec<String> = models
+            .iter()
+            .flat_map(|m| Config::installed_voices(*kind, m))
+            .collect();
+
+        println!();
+        println!("  {} voices:", kind.as_str().bold());
+        println!(
+            "  {:<16} {:<16} {:<8} {:<8} {}",
+            "ID".bold(),
+            "NAME".bold(),
+            "LANG".bold(),
+            "GENDER".bold(),
+            "STATUS".bold()
+        );
+        println!("  {}", "─".repeat(60));
+
+        for voice in voices {
+            let status = if installed_voices.contains(&voice.id.to_string()) {
+                "✓ installed".green().to_string()
+            } else {
+                String::new()
+            };
+            println!(
+                "  {:<16} {:<16} {:<8} {:<8} {}",
+                voice.id, voice.name, voice.language, voice.gender, status
+            );
+        }
+        any_shown = true;
+    }
+
+    if !any_shown {
+        println!("No voices available for the selected engine(s).");
+        println!("Install a model first: local-voice models install kokoro-q8f16");
     }
     println!();
 
@@ -370,6 +460,32 @@ fn handle_speak(
             }
 
             Box::new(eng)
+        }
+        engine::EngineKind::Supertonic => {
+            let st_models = Config::installed_models(Some(engine::EngineKind::Supertonic));
+            let model_id = st_models.first().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No Supertonic model installed. Run: local-voice models install supertonic"
+                )
+            })?;
+
+            let st_voice = voice.unwrap_or(config.supertonic_voice());
+            let spd = speed.unwrap_or(config.supertonic_speed());
+            let steps = config.supertonic_steps();
+            let model_dir =
+                Config::resolve_model_path(engine::EngineKind::Supertonic, model_id);
+
+            eprintln!(
+                "Speaking with Supertonic voice '{st_voice}' (model: {model_id})..."
+            );
+
+            Box::new(engine::supertonic::SupertonicEngine::load(
+                &model_dir,
+                model_id,
+                st_voice,
+                spd,
+                steps,
+            )?)
         }
     };
 

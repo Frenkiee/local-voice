@@ -59,6 +59,7 @@ impl HardwareProfile {
                 }
             }
             EngineKind::Piper => "en_US-lessac-medium",
+            EngineKind::Supertonic => "supertonic",
         }
     }
 

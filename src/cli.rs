@@ -27,8 +27,11 @@ pub enum Commands {
         action: ModelAction,
     },
 
-    /// List installed voices
-    Voices,
+    /// Manage voices (list, install, remove)
+    Voices {
+        #[command(subcommand)]
+        action: Option<VoiceAction>,
+    },
 
     /// Speak text using a local TTS model
     Speak {
@@ -101,6 +104,28 @@ pub enum ModelAction {
     /// Remove an installed model
     Remove {
         /// Model ID
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum VoiceAction {
+    /// List available and installed voices
+    List {
+        /// Filter by engine (kokoro, supertonic)
+        #[arg(short, long)]
+        engine: Option<String>,
+    },
+
+    /// Install a voice by ID
+    Install {
+        /// Voice ID (e.g. af_alloy, bf_emma, M1, F2)
+        id: String,
+    },
+
+    /// Remove an installed voice
+    Remove {
+        /// Voice ID
         id: String,
     },
 }

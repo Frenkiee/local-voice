@@ -1,6 +1,7 @@
 pub mod chatterbox;
 pub mod kokoro;
 pub mod piper;
+pub mod supertonic;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ pub enum EngineKind {
     Kokoro,
     Piper,
     Chatterbox,
+    Supertonic,
 }
 
 impl EngineKind {
@@ -21,6 +23,7 @@ impl EngineKind {
             Self::Kokoro => "kokoro",
             Self::Piper => "piper",
             Self::Chatterbox => "chatterbox",
+            Self::Supertonic => "supertonic",
         }
     }
 
@@ -29,11 +32,12 @@ impl EngineKind {
             Self::Kokoro => "82M params, near-human quality, CPU-friendly",
             Self::Piper => "Tiny models, fastest inference, runs anywhere",
             Self::Chatterbox => "500M params, voice cloning, best with GPU",
+            Self::Supertonic => "66M params, 167x realtime, multilingual, CPU-native",
         }
     }
 
     pub fn all() -> &'static [EngineKind] {
-        &[Self::Kokoro, Self::Piper, Self::Chatterbox]
+        &[Self::Kokoro, Self::Piper, Self::Chatterbox, Self::Supertonic]
     }
 }
 
@@ -51,7 +55,8 @@ impl std::str::FromStr for EngineKind {
             "kokoro" => Ok(Self::Kokoro),
             "piper" => Ok(Self::Piper),
             "chatterbox" => Ok(Self::Chatterbox),
-            _ => anyhow::bail!("Unknown engine '{s}'. Valid engines: kokoro, piper, chatterbox"),
+            "supertonic" => Ok(Self::Supertonic),
+            _ => anyhow::bail!("Unknown engine '{s}'. Valid engines: kokoro, piper, chatterbox, supertonic"),
         }
     }
 }

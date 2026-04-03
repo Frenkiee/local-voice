@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::engine::chatterbox::ChatterboxEngine;
 use crate::engine::kokoro::KokoroEngine;
 use crate::engine::piper::PiperEngine;
+use crate::engine::supertonic::SupertonicEngine;
 use crate::engine::{EngineKind, TtsEngine};
 use crate::hardware::HardwareProfile;
 
@@ -224,6 +225,20 @@ fn handle_speak(
             };
             format!("chatterbox:{model_id}")
         }
+        EngineKind::Supertonic => {
+            let st_voice = voice.as_deref().unwrap_or(config.supertonic_voice());
+            let models = Config::installed_models(Some(EngineKind::Supertonic));
+            let model_id = match models.first() {
+                Some(m) => m.clone(),
+                None => {
+                    return tool_error(
+                        id,
+                        "No Supertonic model installed. Run: local-voice models install supertonic",
+                    )
+                }
+            };
+            format!("supertonic:{model_id}:{st_voice}")
+        }
     };
 
     // Load engine if not cached
@@ -253,6 +268,17 @@ fn handle_speak(
                 ChatterboxEngine::load(&model_dir, model_id)
                     .map(|e| Box::new(e) as Box<dyn TtsEngine>)
                     .map_err(|e| format!("Failed to load Chatterbox: {e}"))
+            }
+            EngineKind::Supertonic => {
+                let models = Config::installed_models(Some(EngineKind::Supertonic));
+                let model_id = models.first().unwrap();
+                let st_voice = voice.as_deref().unwrap_or(config.supertonic_voice());
+                let spd = speed.unwrap_or(config.supertonic_speed());
+                let steps = config.supertonic_steps();
+                let model_dir = Config::resolve_model_path(EngineKind::Supertonic, model_id);
+                SupertonicEngine::load(&model_dir, model_id, st_voice, spd, steps)
+                    .map(|e| Box::new(e) as Box<dyn TtsEngine>)
+                    .map_err(|e| format!("Failed to load Supertonic: {e}"))
             }
         };
 
@@ -319,15 +345,17 @@ fn handle_list_voices(id: &Option<Value>, params: &Value) -> Value {
 
     let mut lines = vec![format!("Installed models: {}", installed.join(", "))];
 
-    // Show Kokoro voices if relevant
-    if engine_filter.is_none() || engine_filter == Some(EngineKind::Kokoro) {
-        let kokoro_installed = !Config::installed_models(Some(EngineKind::Kokoro)).is_empty();
-        if kokoro_installed {
-            let voices: Vec<&str> = crate::registry::kokoro::VOICES
-                .iter()
-                .map(|v| v.id)
-                .collect();
-            lines.push(format!("Kokoro voices: {}", voices.join(", ")));
+    // Show voices for engines that have them
+    let engines = match engine_filter {
+        Some(e) => vec![e],
+        None => EngineKind::all().to_vec(),
+    };
+
+    for kind in engines {
+        let voices = crate::registry::voices_for_engine(kind);
+        if !voices.is_empty() && !Config::installed_models(Some(kind)).is_empty() {
+            let voice_ids: Vec<&str> = voices.iter().map(|v| v.id).collect();
+            lines.push(format!("{} voices: {}", kind, voice_ids.join(", ")));
         }
     }
 

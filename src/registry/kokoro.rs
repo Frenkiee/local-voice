@@ -49,6 +49,24 @@ impl EngineRegistry for KokoroRegistry {
 
         Ok(items)
     }
+
+    fn list_voices(&self) -> Vec<&'static VoiceEntry> {
+        VOICES.iter().collect()
+    }
+
+    fn find_voice(&self, voice_id: &str) -> Option<&'static VoiceEntry> {
+        VOICES.iter().find(|v| v.id == voice_id)
+    }
+
+    fn voice_download_plan(&self, voice_id: &str) -> anyhow::Result<Vec<DownloadItem>> {
+        self.find_voice(voice_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown Kokoro voice: {voice_id}"))?;
+        Ok(vec![DownloadItem {
+            url: voice_download_url(voice_id),
+            dest_relative: PathBuf::from(format!("voices/{voice_id}.bin")),
+            size_hint_mb: Some(1),
+        }])
+    }
 }
 
 struct KokoroVariant {
