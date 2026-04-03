@@ -17,6 +17,10 @@ use owo_colors::OwoColorize;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Enable ANSI color support on Windows 10+ CMD
+    #[cfg(windows)]
+    let _ = enable_ansi_support::enable_ansi_support();
+
     let cli = Cli::parse();
 
     match cli.command {
