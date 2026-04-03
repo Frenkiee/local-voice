@@ -197,7 +197,7 @@ impl Config {
 fn has_model_files(dir: &std::path::Path, engine: EngineKind) -> bool {
     match engine {
         EngineKind::Piper => dir.join("model.onnx").exists() && dir.join("model.onnx.json").exists(),
-        EngineKind::Kokoro => dir.join("model.onnx").exists() && dir.join("tokens.json").exists(),
+        EngineKind::Kokoro => dir.join("model.onnx").exists(),
         EngineKind::Chatterbox => {
             dir.join("conditional_decoder.onnx").exists()
                 && dir.join("speech_encoder.onnx").exists()

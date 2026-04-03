@@ -38,12 +38,6 @@ impl EngineRegistry for KokoroRegistry {
                 dest_relative: PathBuf::from("model.onnx"),
                 size_hint_mb: Some(entry.size_mb),
             },
-            // Tokenizer vocabulary
-            DownloadItem {
-                url: format!("{HF_BASE}/tokens.json"),
-                dest_relative: PathBuf::from("tokens.json"),
-                size_hint_mb: Some(1),
-            },
         ];
 
         // Default voice (af_alloy)
