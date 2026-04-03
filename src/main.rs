@@ -3,7 +3,9 @@ mod cli;
 mod config;
 mod download;
 mod engine;
+mod hardware;
 mod mcp;
+mod phonemize;
 mod registry;
 
 use anyhow::{bail, Result};

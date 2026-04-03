@@ -2,9 +2,9 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 
-use super::{AudioOutput, TtsEngine};
+use super::{AudioOutput, EngineKind, TtsEngine, VoiceInfo};
+use crate::phonemize::Phonemizer;
 use ort::value::Value;
 
 /// Piper model configuration (from .onnx.json)
@@ -42,6 +42,7 @@ pub struct PiperEngine {
     session: ort::session::Session,
     config: PiperConfig,
     model_id: String,
+    phonemizer: Phonemizer,
 }
 
 impl PiperEngine {
@@ -58,67 +59,22 @@ impl PiperEngine {
 
         let config_str = std::fs::read_to_string(&config_path)
             .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        let config: PiperConfig = serde_json::from_str(&config_str)
-            .with_context(|| "Failed to parse model config")?;
+        let config: PiperConfig =
+            serde_json::from_str(&config_str).with_context(|| "Failed to parse model config")?;
 
-        let mut builder = ort::session::Session::builder()
-            .with_context(|| "Failed to create ONNX session builder")?;
-        let session = builder
+        let session = ort::session::Session::builder()
+            .with_context(|| "Failed to create ONNX session builder")?
             .commit_from_file(&onnx_path)
             .with_context(|| format!("Failed to load ONNX model from {}", onnx_path.display()))?;
+
+        let phonemizer = Phonemizer::new()?;
 
         Ok(Self {
             session,
             config,
             model_id: model_id.to_string(),
+            phonemizer,
         })
-    }
-
-    fn find_espeak_ng() -> &'static str {
-        // Check common paths since PATH may not include package manager dirs
-        static PATHS: &[&str] = &[
-            "espeak-ng",
-            "/opt/homebrew/bin/espeak-ng",
-            "/usr/local/bin/espeak-ng",
-            "/usr/bin/espeak-ng",
-            "/opt/local/bin/espeak-ng",
-            "C:\\Program Files\\eSpeak NG\\espeak-ng.exe",
-            "C:\\Program Files (x86)\\eSpeak NG\\espeak-ng.exe",
-        ];
-
-        for path in PATHS {
-            if Command::new(path).arg("--version").output().is_ok() {
-                return path;
-            }
-        }
-        "espeak-ng"
-    }
-
-    fn phonemize(&self, text: &str) -> Result<String> {
-        let voice = self
-            .config
-            .espeak
-            .as_ref()
-            .map(|e| e.voice.as_str())
-            .unwrap_or("en-us");
-
-        let espeak = Self::find_espeak_ng();
-        let output = Command::new(espeak)
-            .args(["--ipa=1", "-q", "-v", voice, text])
-            .output()
-            .with_context(|| {
-                "Failed to run espeak-ng. Is it installed? (brew install espeak-ng)"
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("espeak-ng failed: {stderr}");
-        }
-
-        let phonemes = String::from_utf8(output.stdout)
-            .with_context(|| "espeak-ng output is not valid UTF-8")?;
-
-        Ok(phonemes.trim().to_string())
     }
 
     fn phonemes_to_ids(&self, phonemes: &str) -> Vec<i64> {
@@ -176,7 +132,13 @@ impl PiperEngine {
 
 impl TtsEngine for PiperEngine {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput> {
-        // Split into sentences for better synthesis
+        let voice = self
+            .config
+            .espeak
+            .as_ref()
+            .map(|e| e.voice.clone())
+            .unwrap_or_else(|| "en-us".to_string());
+
         let sentences = split_sentences(text);
         let mut all_samples = Vec::new();
 
@@ -186,7 +148,7 @@ impl TtsEngine for PiperEngine {
                 continue;
             }
 
-            let phonemes = self.phonemize(trimmed)?;
+            let phonemes = self.phonemizer.phonemize(trimmed, &voice)?;
             if phonemes.is_empty() {
                 continue;
             }
@@ -195,7 +157,6 @@ impl TtsEngine for PiperEngine {
             let samples = self.run_inference(&ids)?;
             all_samples.extend(samples);
 
-            // Small silence between sentences
             if sentences.len() > 1 {
                 let silence_samples = (self.config.audio.sample_rate as f32 * 0.15) as usize;
                 all_samples.extend(std::iter::repeat_n(0.0f32, silence_samples));
@@ -211,6 +172,24 @@ impl TtsEngine for PiperEngine {
 
     fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    fn engine_kind(&self) -> EngineKind {
+        EngineKind::Piper
+    }
+
+    fn available_voices(&self) -> Vec<VoiceInfo> {
+        // For Piper, the model IS the voice
+        vec![VoiceInfo {
+            id: self.model_id.clone(),
+            name: self.model_id.clone(),
+            language: "en".to_string(),
+            description: "Piper voice".to_string(),
+        }]
+    }
+
+    fn set_voice(&mut self, _voice_id: &str) -> Result<()> {
+        bail!("Piper requires a full model reload to change voice. Use a different model ID.")
     }
 }
 
