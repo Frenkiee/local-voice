@@ -74,6 +74,26 @@ impl PiperEngine {
         })
     }
 
+    fn find_espeak_ng() -> &'static str {
+        // Check common paths since PATH may not include package manager dirs
+        static PATHS: &[&str] = &[
+            "espeak-ng",
+            "/opt/homebrew/bin/espeak-ng",
+            "/usr/local/bin/espeak-ng",
+            "/usr/bin/espeak-ng",
+            "/opt/local/bin/espeak-ng",
+            "C:\\Program Files\\eSpeak NG\\espeak-ng.exe",
+            "C:\\Program Files (x86)\\eSpeak NG\\espeak-ng.exe",
+        ];
+
+        for path in PATHS {
+            if Command::new(path).arg("--version").output().is_ok() {
+                return path;
+            }
+        }
+        "espeak-ng"
+    }
+
     fn phonemize(&self, text: &str) -> Result<String> {
         let voice = self
             .config
@@ -82,7 +102,8 @@ impl PiperEngine {
             .map(|e| e.voice.as_str())
             .unwrap_or("en-us");
 
-        let output = Command::new("espeak-ng")
+        let espeak = Self::find_espeak_ng();
+        let output = Command::new(espeak)
             .args(["--ipa=1", "-q", "-v", voice, text])
             .output()
             .with_context(|| {

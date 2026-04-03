@@ -12,15 +12,13 @@ pub fn play_audio(audio: &AudioOutput) -> Result<()> {
         audio.samples.clone(),
     );
 
-    let sink = rodio::DeviceSinkBuilder::open_default_sink()
+    let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
         .with_context(|| "Failed to open audio output device")?;
+    sink.log_on_drop(false);
 
     let player = rodio::Player::connect_new(sink.mixer());
     player.append(source);
     player.sleep_until_end();
-
-    // Keep sink alive until playback finishes
-    drop(sink);
 
     Ok(())
 }
