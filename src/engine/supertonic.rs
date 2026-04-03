@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 use ort::value::Value;
+use rand::SeedableRng;
 use serde::Deserialize;
 use std::path::Path;
-#[allow(unused_imports)]
 use unicode_normalization::UnicodeNormalization;
 
 use super::{AudioOutput, EngineKind, TtsEngine, VoiceInfo};
@@ -288,8 +288,12 @@ impl SupertonicEngine {
 
         eprintln!("[supertonic] latent: dim={latent_dim_val}, len={latent_len}, wav_len={wav_len}");
 
-        // Use zeros for deterministic output (no randomness)
-        let xt_init: Vec<f32> = vec![0.0; latent_dim_val * latent_len];
+        // Use fixed-seed noise for deterministic output
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let normal = rand_distr::Normal::new(0.0f32, 1.0).unwrap();
+        let xt_init: Vec<f32> = (0..latent_dim_val * latent_len)
+            .map(|_| rand_distr::Distribution::sample(&normal, &mut rng))
+            .collect();
 
         // Latent mask: [1, 1, latent_len]
         let latent_mask: Vec<f32> = vec![1.0; latent_len];
