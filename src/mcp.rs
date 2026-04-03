@@ -82,7 +82,21 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
             "tools": [
                 {
                     "name": "speak",
-                    "description": "Convert text to speech using a local TTS model. Plays audio on the user's device. Uses configured engine, model, and voice.",
+                    "description": "Convert text to speech and play audio. Blocks during synthesis (~1-2s), then queues audio for background playback.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "The text to speak aloud"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                },
+                {
+                    "name": "speak_async",
+                    "description": "Queue text for speech in the background. Returns immediately — synthesis and playback happen asynchronously. Best for notifications where you don't need to wait.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -182,6 +196,7 @@ fn handle_tools_call(
 
     match tool_name {
         "speak" => handle_speak(id, params, engines, audio_queue),
+        "speak_async" => handle_speak_async(id, params, audio_queue),
         "set_config" => handle_set_config(id, params, engines),
         "get_config" => handle_get_config(id),
         "list_engines" => handle_list_engines(id),
@@ -241,6 +256,51 @@ fn handle_speak(
         }
         Err(e) => tool_error(id, &format!("Synthesis failed: {e}")),
     }
+}
+
+// ── speak_async ──
+
+fn handle_speak_async(
+    id: &Option<Value>,
+    params: &Value,
+    audio_queue: &audio::AudioQueue,
+) -> Value {
+    let args = &params["arguments"];
+    let text = match args["text"].as_str() {
+        Some(t) if !t.trim().is_empty() => t.to_string(),
+        _ => return tool_error(id, "Missing or empty 'text' argument"),
+    };
+
+    // Capture config now, synthesize later on worker thread
+    let config = match Config::load() {
+        Ok(c) => c,
+        Err(e) => return tool_error(id, &format!("Failed to load config: {e}")),
+    };
+
+    let engine_kind = config
+        .default_engine
+        .unwrap_or_else(|| HardwareProfile::detect().recommended_engine());
+    let voice = config.default_voice.as_deref().map(String::from);
+
+    audio_queue.enqueue_job(Box::new(move || {
+        let voice_ref = voice.as_deref();
+        let mut engine = match load_engine(&config, engine_kind, voice_ref) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("[local-voice] speak_async engine load failed: {e}");
+                return None;
+            }
+        };
+        match engine.synthesize(&text) {
+            Ok(audio) => Some(audio),
+            Err(e) => {
+                eprintln!("[local-voice] speak_async synthesis failed: {e}");
+                None
+            }
+        }
+    }));
+
+    tool_result(id, &format!("Queued speech using {engine_kind} engine"))
 }
 
 // ── set_config ──

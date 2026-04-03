@@ -27,24 +27,45 @@ pub fn play_audio(audio: &AudioOutput) -> Result<()> {
 
 /// Background audio queue — plays audio sequentially without blocking the caller.
 pub struct AudioQueue {
-    tx: SyncSender<AudioOutput>,
+    audio_tx: SyncSender<AudioOutput>,
+    work_tx: SyncSender<Box<dyn FnOnce() -> Option<AudioOutput> + Send>>,
 }
 
 impl AudioQueue {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::sync_channel::<AudioOutput>(16);
+        // Audio playback thread
+        let (audio_tx, audio_rx) = mpsc::sync_channel::<AudioOutput>(16);
         thread::spawn(move || {
-            while let Ok(audio) = rx.recv() {
+            while let Ok(audio) = audio_rx.recv() {
                 if let Err(e) = play_audio(&audio) {
                     eprintln!("[local-voice] Playback error: {e}");
                 }
             }
         });
-        Self { tx }
+
+        // Synthesis worker thread — runs jobs that produce audio, then forwards to playback
+        let work_audio_tx = audio_tx.clone();
+        let (work_tx, work_rx) =
+            mpsc::sync_channel::<Box<dyn FnOnce() -> Option<AudioOutput> + Send>>(16);
+        thread::spawn(move || {
+            while let Ok(job) = work_rx.recv() {
+                if let Some(audio) = job() {
+                    work_audio_tx.send(audio).ok();
+                }
+            }
+        });
+
+        Self { audio_tx, work_tx }
     }
 
+    /// Enqueue pre-synthesized audio for playback
     pub fn enqueue(&self, audio: AudioOutput) {
-        self.tx.send(audio).ok();
+        self.audio_tx.send(audio).ok();
+    }
+
+    /// Enqueue a synthesis job — runs in background, audio plays when ready
+    pub fn enqueue_job(&self, job: Box<dyn FnOnce() -> Option<AudioOutput> + Send>) {
+        self.work_tx.send(job).ok();
     }
 }
 
