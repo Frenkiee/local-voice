@@ -65,6 +65,7 @@ pub struct AudioOutput {
 
 /// Information about a voice available in an engine
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VoiceInfo {
     pub id: String,
     pub name: String,
