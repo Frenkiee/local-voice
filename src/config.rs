@@ -8,6 +8,7 @@ use crate::engine::EngineKind;
 pub struct Config {
     pub default_voice: Option<String>,
     pub default_engine: Option<EngineKind>,
+    pub default_model: Option<String>,
     pub output_dir: Option<String>,
     pub kokoro: Option<KokoroConfig>,
     pub chatterbox: Option<ChatterboxConfig>,
@@ -175,6 +176,18 @@ impl Config {
         }
 
         models
+    }
+
+    /// Resolve which model to use for an engine: default_model (if it belongs to engine) > first installed
+    pub fn resolve_model(&self, engine: EngineKind) -> Option<String> {
+        // Check if default_model is set and belongs to this engine
+        if let Some(ref model_id) = self.default_model {
+            if Self::installed_engine_for(model_id) == Some(engine) {
+                return Some(model_id.clone());
+            }
+        }
+        // Fall back to first installed for this engine
+        Self::installed_models(Some(engine)).into_iter().next()
     }
 
     /// Resolve which voice to use: explicit > config default > first installed

@@ -392,9 +392,25 @@ fn handle_speak(
 
     let engine_kind = match engine_name {
         Some(e) => e.parse::<engine::EngineKind>()?,
-        None => config
-            .default_engine
-            .unwrap_or_else(|| hardware::HardwareProfile::detect().recommended_engine()),
+        None => {
+            // Auto-detect engine from voice ID if provided
+            if let Some(v) = voice {
+                if let Some((engine, _)) = registry::find_voice_any_engine(v) {
+                    engine
+                } else if let Some((engine, _)) = registry::find_model_any_engine(v) {
+                    // Voice arg might be a model name for Piper
+                    engine
+                } else {
+                    config
+                        .default_engine
+                        .unwrap_or_else(|| hardware::HardwareProfile::detect().recommended_engine())
+                }
+            } else {
+                config
+                    .default_engine
+                    .unwrap_or_else(|| hardware::HardwareProfile::detect().recommended_engine())
+            }
+        }
     };
 
     let mut tts: Box<dyn engine::TtsEngine> = match engine_kind {
@@ -414,8 +430,7 @@ fn handle_speak(
             Box::new(engine::piper::PiperEngine::load(&model_dir, &voice_id)?)
         }
         engine::EngineKind::Kokoro => {
-            let kokoro_models = Config::installed_models(Some(engine::EngineKind::Kokoro));
-            let model_id = kokoro_models.first().ok_or_else(|| {
+            let model_id = config.resolve_model(engine::EngineKind::Kokoro).ok_or_else(|| {
                 anyhow::anyhow!(
                     "No Kokoro model installed. Run: local-voice models install kokoro-q8f16"
                 )
@@ -424,7 +439,7 @@ fn handle_speak(
             let kokoro_voice = voice.unwrap_or(config.kokoro_voice());
             let spd = speed.unwrap_or(config.kokoro_speed());
             let model_dir =
-                Config::resolve_model_path(engine::EngineKind::Kokoro, model_id);
+                Config::resolve_model_path(engine::EngineKind::Kokoro, &model_id);
 
             eprintln!(
                 "Speaking with Kokoro voice '{kokoro_voice}' (model: {model_id})..."
@@ -432,25 +447,24 @@ fn handle_speak(
 
             Box::new(engine::kokoro::KokoroEngine::load(
                 &model_dir,
-                model_id,
+                &model_id,
                 kokoro_voice,
                 spd,
             )?)
         }
         engine::EngineKind::Chatterbox => {
-            let cb_models = Config::installed_models(Some(engine::EngineKind::Chatterbox));
-            let model_id = cb_models.first().ok_or_else(|| {
+            let model_id = config.resolve_model(engine::EngineKind::Chatterbox).ok_or_else(|| {
                 anyhow::anyhow!(
                     "No Chatterbox model installed. Run: local-voice models install chatterbox-quantized"
                 )
             })?;
 
             let model_dir =
-                Config::resolve_model_path(engine::EngineKind::Chatterbox, model_id);
+                Config::resolve_model_path(engine::EngineKind::Chatterbox, &model_id);
 
             eprintln!("Speaking with Chatterbox (model: {model_id})...");
 
-            let mut eng = engine::chatterbox::ChatterboxEngine::load(&model_dir, model_id)?;
+            let mut eng = engine::chatterbox::ChatterboxEngine::load(&model_dir, &model_id)?;
 
             // If a voice path was provided, use it for cloning
             if let Some(v) = voice {
@@ -462,8 +476,7 @@ fn handle_speak(
             Box::new(eng)
         }
         engine::EngineKind::Supertonic => {
-            let st_models = Config::installed_models(Some(engine::EngineKind::Supertonic));
-            let model_id = st_models.first().ok_or_else(|| {
+            let model_id = config.resolve_model(engine::EngineKind::Supertonic).ok_or_else(|| {
                 anyhow::anyhow!(
                     "No Supertonic model installed. Run: local-voice models install supertonic"
                 )
@@ -473,7 +486,7 @@ fn handle_speak(
             let spd = speed.unwrap_or(config.supertonic_speed());
             let steps = config.supertonic_steps();
             let model_dir =
-                Config::resolve_model_path(engine::EngineKind::Supertonic, model_id);
+                Config::resolve_model_path(engine::EngineKind::Supertonic, &model_id);
 
             eprintln!(
                 "Speaking with Supertonic voice '{st_voice}' (model: {model_id})..."
@@ -481,7 +494,7 @@ fn handle_speak(
 
             Box::new(engine::supertonic::SupertonicEngine::load(
                 &model_dir,
-                model_id,
+                &model_id,
                 st_voice,
                 spd,
                 steps,
@@ -518,6 +531,10 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                     .unwrap_or_else(|| "(auto-detect)".dimmed().to_string())
             );
             println!(
+                "    default_model:  {}",
+                config.default_model.as_deref().unwrap_or("(not set)")
+            );
+            println!(
                 "    default_voice:  {}",
                 config.default_voice.as_deref().unwrap_or("(not set)")
             );
@@ -547,6 +564,16 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                     let engine: engine::EngineKind = value.parse()?;
                     config.default_engine = Some(engine);
                 }
+                "default_model" => {
+                    if !Config::is_model_installed(&value) {
+                        bail!("Model '{value}' is not installed. Run 'local-voice models list' to see available models.");
+                    }
+                    config.default_model = Some(value.clone());
+                    // Also set the engine to match
+                    if let Some(engine) = Config::installed_engine_for(&value) {
+                        config.default_engine = Some(engine);
+                    }
+                }
                 "output_dir" => config.output_dir = Some(value.clone()),
                 "kokoro.speed" => {
                     let speed: f32 = value.parse().map_err(|_| anyhow::anyhow!("Invalid speed value"))?;
@@ -570,7 +597,7 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                         .default_voice = Some(value.clone());
                 }
                 _ => bail!(
-                    "Unknown config key '{key}'. Valid keys: default_voice, default_engine, output_dir, kokoro.speed, kokoro.default_voice"
+                    "Unknown config key '{key}'. Valid keys: default_model, default_voice, default_engine, output_dir, kokoro.speed, kokoro.default_voice"
                 ),
             }
             config.save()?;
