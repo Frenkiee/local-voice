@@ -241,6 +241,26 @@ async fn handle_models(action: ModelAction) -> Result<()> {
                 config.default_engine = None;
                 config.save()?;
             }
+            if config.default_model.as_deref() == Some(&id) {
+                config.default_model = None;
+                config.save()?;
+            }
+        }
+
+        ModelAction::Default { id } => {
+            if !Config::is_model_installed(&id) {
+                bail!(
+                    "Model '{id}' is not installed. Run 'local-voice models install {id}' first."
+                );
+            }
+
+            let mut config = Config::load()?;
+            config.default_model = Some(id.clone());
+            if let Some(engine) = Config::installed_engine_for(&id) {
+                config.default_engine = Some(engine);
+            }
+            config.save()?;
+            println!("{}", format!("✓ Default model set to '{id}'.").green());
         }
     }
 
@@ -324,6 +344,16 @@ async fn handle_voices(action: Option<VoiceAction>) -> Result<()> {
 
             std::fs::remove_file(&voice_file)?;
             println!("{}", format!("✓ Voice '{id}' removed.").green());
+        }
+        Some(VoiceAction::Default { id }) => {
+            let mut config = Config::load()?;
+            // Auto-detect engine from voice
+            if let Some((engine, _)) = registry::find_voice_any_engine(&id) {
+                config.default_engine = Some(engine);
+            }
+            config.default_voice = Some(id.clone());
+            config.save()?;
+            println!("{}", format!("✓ Default voice set to '{id}'.").green());
         }
     }
 

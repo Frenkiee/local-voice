@@ -106,6 +106,12 @@ pub enum ModelAction {
         /// Model ID
         id: String,
     },
+
+    /// Set the default model
+    Default {
+        /// Model ID (e.g. kokoro-q8f16, supertonic)
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -126,6 +132,12 @@ pub enum VoiceAction {
     /// Remove an installed voice
     Remove {
         /// Voice ID
+        id: String,
+    },
+
+    /// Set the default voice
+    Default {
+        /// Voice ID (e.g. af_alloy, F1, en_US-lessac-medium)
         id: String,
     },
 }
