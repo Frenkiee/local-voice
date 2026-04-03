@@ -200,9 +200,8 @@ fn handle_speak(
         }
         EngineKind::Kokoro => {
             let kokoro_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
-            let models = Config::installed_models(Some(EngineKind::Kokoro));
-            let model_id = match models.first() {
-                Some(m) => m.clone(),
+            let model_id = match config.resolve_model(EngineKind::Kokoro) {
+                Some(m) => m,
                 None => {
                     return tool_error(
                         id,
@@ -213,9 +212,8 @@ fn handle_speak(
             format!("kokoro:{model_id}:{kokoro_voice}")
         }
         EngineKind::Chatterbox => {
-            let models = Config::installed_models(Some(EngineKind::Chatterbox));
-            let model_id = match models.first() {
-                Some(m) => m.clone(),
+            let model_id = match config.resolve_model(EngineKind::Chatterbox) {
+                Some(m) => m,
                 None => {
                     return tool_error(
                         id,
@@ -227,9 +225,8 @@ fn handle_speak(
         }
         EngineKind::Supertonic => {
             let st_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
-            let models = Config::installed_models(Some(EngineKind::Supertonic));
-            let model_id = match models.first() {
-                Some(m) => m.clone(),
+            let model_id = match config.resolve_model(EngineKind::Supertonic) {
+                Some(m) => m,
                 None => {
                     return tool_error(
                         id,
@@ -252,31 +249,28 @@ fn handle_speak(
                     .map_err(|e| format!("Failed to load Piper: {e}"))
             }
             EngineKind::Kokoro => {
-                let models = Config::installed_models(Some(EngineKind::Kokoro));
-                let model_id = models.first().unwrap();
+                let model_id = config.resolve_model(EngineKind::Kokoro).unwrap();
                 let kokoro_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
                 let spd = speed.unwrap_or(config.kokoro_speed());
-                let model_dir = Config::resolve_model_path(EngineKind::Kokoro, model_id);
-                KokoroEngine::load(&model_dir, model_id, kokoro_voice, spd)
+                let model_dir = Config::resolve_model_path(EngineKind::Kokoro, &model_id);
+                KokoroEngine::load(&model_dir, &model_id, kokoro_voice, spd)
                     .map(|e| Box::new(e) as Box<dyn TtsEngine>)
                     .map_err(|e| format!("Failed to load Kokoro: {e}"))
             }
             EngineKind::Chatterbox => {
-                let models = Config::installed_models(Some(EngineKind::Chatterbox));
-                let model_id = models.first().unwrap();
-                let model_dir = Config::resolve_model_path(EngineKind::Chatterbox, model_id);
-                ChatterboxEngine::load(&model_dir, model_id)
+                let model_id = config.resolve_model(EngineKind::Chatterbox).unwrap();
+                let model_dir = Config::resolve_model_path(EngineKind::Chatterbox, &model_id);
+                ChatterboxEngine::load(&model_dir, &model_id)
                     .map(|e| Box::new(e) as Box<dyn TtsEngine>)
                     .map_err(|e| format!("Failed to load Chatterbox: {e}"))
             }
             EngineKind::Supertonic => {
-                let models = Config::installed_models(Some(EngineKind::Supertonic));
-                let model_id = models.first().unwrap();
+                let model_id = config.resolve_model(EngineKind::Supertonic).unwrap();
                 let st_voice = voice.as_deref().or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
                 let spd = speed.unwrap_or(config.supertonic_speed());
                 let steps = config.supertonic_steps();
-                let model_dir = Config::resolve_model_path(EngineKind::Supertonic, model_id);
-                SupertonicEngine::load(&model_dir, model_id, st_voice, spd, steps)
+                let model_dir = Config::resolve_model_path(EngineKind::Supertonic, &model_id);
+                SupertonicEngine::load(&model_dir, &model_id, st_voice, spd, steps)
                     .map(|e| Box::new(e) as Box<dyn TtsEngine>)
                     .map_err(|e| format!("Failed to load Supertonic: {e}"))
             }
