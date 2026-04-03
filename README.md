@@ -201,6 +201,40 @@ local-voice includes a built-in [MCP](https://modelcontextprotocol.io/) server t
 | `list_models` | List available and installed models |
 | `list_voices` | List available and installed voices |
 
+### Teaching Your Agent to Speak
+
+To make Claude (or any MCP-compatible agent) use local-voice proactively, add a memory/instruction like this:
+
+```markdown
+Use `mcp__local-voice__speak` throughout your workflow:
+
+1. **Before starting a task** — quick notice of what you're about to do
+2. **When dispatching agents** — say how many agents and what they're doing
+3. **When an agent finishes** — brief result summary
+4. **When a task is complete** — explain what was done in 1-2 sentences
+5. **When user needs to take action** — restart server, rebuild, install deps, etc.
+
+Keep it short and informative — 1-2 sentences max per call.
+```
+
+For **Claude Code**, save this as a memory file at:
+```
+~/.claude/projects/<your-project>/memory/feedback_speak.md
+```
+
+With frontmatter:
+```yaml
+---
+name: Speak when done
+description: Use TTS to announce task starts, agent dispatches, and completions
+type: feedback
+---
+```
+
+For **Claude Desktop**, add the instruction to your system prompt or project instructions.
+
+This turns your agent into a voice-narrated assistant — you can step away from the screen and still know what's happening.
+
 ## Engines
 
 ### Kokoro
