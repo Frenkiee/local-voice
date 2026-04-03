@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ort::value::Value;
 use rand::SeedableRng;
 use serde::Deserialize;
@@ -157,28 +157,58 @@ impl SupertonicEngine {
 
         // Replace dashes, quotes, symbols — match Python reference exactly
         let replacements: &[(&str, &str)] = &[
-            ("\u{2013}", "-"), ("\u{2011}", "-"), ("\u{2014}", "-"),
-            ("\u{00AF}", " "), ("_", " "),
-            ("\u{201C}", "\""), ("\u{201D}", "\""),
-            ("\u{2018}", "'"), ("\u{2019}", "'"),
-            ("\u{00B4}", "'"), ("`", "'"),
-            ("[", " "), ("]", " "),
-            ("|", " "), ("/", " "),
-            ("#", " "), ("\u{2192}", " "), ("\u{2190}", " "),
+            ("\u{2013}", "-"),
+            ("\u{2011}", "-"),
+            ("\u{2014}", "-"),
+            ("\u{00AF}", " "),
+            ("_", " "),
+            ("\u{201C}", "\""),
+            ("\u{201D}", "\""),
+            ("\u{2018}", "'"),
+            ("\u{2019}", "'"),
+            ("\u{00B4}", "'"),
+            ("`", "'"),
+            ("[", " "),
+            ("]", " "),
+            ("|", " "),
+            ("/", " "),
+            ("#", " "),
+            ("\u{2192}", " "),
+            ("\u{2190}", " "),
         ];
         for (from, to) in replacements {
             s = s.replace(from, to);
         }
 
         // Remove combining diacritics (Python reference does this after NFKD)
-        s = s.chars().filter(|c| {
-            let cp = *c as u32;
-            !matches!(cp,
-                0x0302 | 0x0303 | 0x0304 | 0x0305 | 0x0306 | 0x0307 | 0x0308 |
-                0x030A | 0x030B | 0x030C | 0x0327 | 0x0328 | 0x0329 | 0x032A |
-                0x032B | 0x032C | 0x032D | 0x032E | 0x032F
-            )
-        }).collect();
+        s = s
+            .chars()
+            .filter(|c| {
+                let cp = *c as u32;
+                !matches!(
+                    cp,
+                    0x0302
+                        | 0x0303
+                        | 0x0304
+                        | 0x0305
+                        | 0x0306
+                        | 0x0307
+                        | 0x0308
+                        | 0x030A
+                        | 0x030B
+                        | 0x030C
+                        | 0x0327
+                        | 0x0328
+                        | 0x0329
+                        | 0x032A
+                        | 0x032B
+                        | 0x032C
+                        | 0x032D
+                        | 0x032E
+                        | 0x032F
+                )
+            })
+            .collect();
 
         // Remove special symbols
         s = s.replace('\u{2665}', ""); // ♥
@@ -202,22 +232,46 @@ impl SupertonicEngine {
         s = s.replace(" '", "'");
 
         // Remove duplicate quotes
-        while s.contains("\"\"") { s = s.replace("\"\"", "\""); }
-        while s.contains("''") { s = s.replace("''", "'"); }
-        while s.contains("``") { s = s.replace("``", "`"); }
+        while s.contains("\"\"") {
+            s = s.replace("\"\"", "\"");
+        }
+        while s.contains("''") {
+            s = s.replace("''", "'");
+        }
+        while s.contains("``") {
+            s = s.replace("``", "`");
+        }
 
         // Collapse whitespace
-        while s.contains("  ") { s = s.replace("  ", " "); }
+        while s.contains("  ") {
+            s = s.replace("  ", " ");
+        }
         s = s.trim().to_string();
 
         // Add terminal period if needed — match Python regex check
         if !s.is_empty() {
             let last = s.chars().last().unwrap();
-            if !matches!(last,
-                '.' | '!' | '?' | ';' | ':' | ',' | '\'' | '"' |
-                ')' | ']' | '}' | '\u{2026}' | '\u{3002}' | '\u{300D}' |
-                '\u{300F}' | '\u{3011}' | '\u{3009}' | '\u{300B}' |
-                '\u{203A}' | '\u{00BB}'
+            if !matches!(
+                last,
+                '.' | '!'
+                    | '?'
+                    | ';'
+                    | ':'
+                    | ','
+                    | '\''
+                    | '"'
+                    | ')'
+                    | ']'
+                    | '}'
+                    | '\u{2026}'
+                    | '\u{3002}'
+                    | '\u{300D}'
+                    | '\u{300F}'
+                    | '\u{3011}'
+                    | '\u{3009}'
+                    | '\u{300B}'
+                    | '\u{203A}'
+                    | '\u{00BB}'
             ) {
                 s.push('.');
             }
@@ -274,7 +328,11 @@ impl SupertonicEngine {
 
         let (te_shape, text_emb_raw) = te_outputs[0].try_extract_tensor::<f32>()?;
         let text_emb_data = text_emb_raw.to_vec();
-        let text_emb_shape = [te_shape[0] as usize, te_shape[1] as usize, te_shape[2] as usize];
+        let text_emb_shape = [
+            te_shape[0] as usize,
+            te_shape[1] as usize,
+            te_shape[2] as usize,
+        ];
 
         // 3. Sample noisy latent
         let chunk_size = self.base_chunk_size * self.chunk_compress_factor;
@@ -295,7 +353,8 @@ impl SupertonicEngine {
         for step in 0..self.total_step {
             let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt.clone()))?;
             let v_text_emb = Value::from_array((text_emb_shape, text_emb_data.clone()))?;
-            let v_style_ttl = Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
+            let v_style_ttl =
+                Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
             let v_latent_mask = Value::from_array(([1usize, 1, latent_len], latent_mask.clone()))?;
             let v_text_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
             let v_current = Value::from_array(([1usize], vec![step as f32]))?;
@@ -388,8 +447,8 @@ fn load_voice_style(model_dir: &Path, voice_id: &str) -> Result<Style> {
     let data = std::fs::read_to_string(&voice_path)
         .with_context(|| format!("Failed to read voice file: {}", voice_path.display()))?;
 
-    let vsd: VoiceStyleData = serde_json::from_str(&data)
-        .with_context(|| "Failed to parse voice style JSON")?;
+    let vsd: VoiceStyleData =
+        serde_json::from_str(&data).with_context(|| "Failed to parse voice style JSON")?;
 
     let (ttl_data, ttl_shape) = flatten_style_component(&vsd.style_ttl)?;
     let (dp_data, dp_shape) = flatten_style_component(&vsd.style_dp)?;
@@ -417,4 +476,3 @@ fn flatten_style_component(sc: &StyleComponent) -> Result<(Vec<f32>, [usize; 3])
 
     Ok((flat, [dims[0], dims[1], dims[2]]))
 }
-

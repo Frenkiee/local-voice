@@ -37,7 +37,12 @@ impl EngineKind {
     }
 
     pub fn all() -> &'static [EngineKind] {
-        &[Self::Kokoro, Self::Piper, Self::Chatterbox, Self::Supertonic]
+        &[
+            Self::Kokoro,
+            Self::Piper,
+            Self::Chatterbox,
+            Self::Supertonic,
+        ]
     }
 }
 
@@ -56,7 +61,9 @@ impl std::str::FromStr for EngineKind {
             "piper" => Ok(Self::Piper),
             "chatterbox" => Ok(Self::Chatterbox),
             "supertonic" => Ok(Self::Supertonic),
-            _ => anyhow::bail!("Unknown engine '{s}'. Valid engines: kokoro, piper, chatterbox, supertonic"),
+            _ => anyhow::bail!(
+                "Unknown engine '{s}'. Valid engines: kokoro, piper, chatterbox, supertonic"
+            ),
         }
     }
 }

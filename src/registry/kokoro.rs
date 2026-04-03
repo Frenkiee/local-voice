@@ -2,8 +2,7 @@ use super::{DownloadItem, EngineRegistry, ModelEntry, VoiceEntry};
 use crate::engine::EngineKind;
 use std::path::PathBuf;
 
-const HF_BASE: &str =
-    "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
+const HF_BASE: &str = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
 
 pub struct KokoroRegistry;
 

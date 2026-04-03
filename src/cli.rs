@@ -30,53 +30,45 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// List available TTS engines and recommendations
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   local-voice engines                    List all engines with status
-  local-voice engines info kokoro        Detailed info about an engine"
-    )]
+  local-voice engines info kokoro        Detailed info about an engine")]
     Engines {
         #[command(subcommand)]
         action: Option<EngineAction>,
     },
 
     /// Manage TTS models — list, install, remove, set default
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   local-voice models list                List all available models
   local-voice models list -e kokoro      Filter by engine
   local-voice models install supertonic  Install a model
   local-voice models default kokoro-q8f16  Set default model
-  local-voice models remove kokoro-fp32  Remove a model"
-    )]
+  local-voice models remove kokoro-fp32  Remove a model")]
     Models {
         #[command(subcommand)]
         action: ModelAction,
     },
 
     /// Manage voices — list, install, remove, set default
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   local-voice voices                     List all voices
   local-voice voices list -e kokoro      Filter by engine
   local-voice voices install bf_emma     Install a Kokoro voice
   local-voice voices install M2          Install a Supertonic voice
-  local-voice voices default F1          Set default voice"
-    )]
+  local-voice voices default F1          Set default voice")]
     Voices {
         #[command(subcommand)]
         action: Option<VoiceAction>,
     },
 
     /// Speak text aloud using the configured TTS engine
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   local-voice speak \"Hello world\"                  Use defaults
   local-voice speak \"Hi\" --voice af_alloy          Override voice
   local-voice speak \"Hi\" -e supertonic --speed 1.2 Override engine and speed
   local-voice speak \"Hi\" -o output.wav             Save to file
-  local-voice speak \"Hi\" -o out.wav --no-play      Save only, don't play"
-    )]
+  local-voice speak \"Hi\" -o out.wav --no-play      Save only, don't play")]
     Speak {
         /// Text to speak
         text: String,
@@ -103,34 +95,28 @@ pub enum Commands {
     },
 
     /// Start MCP server (JSON-RPC over stdio)
-    #[command(
-        after_help = "\x1b[1mUsage:\x1b[0m
+    #[command(after_help = "\x1b[1mUsage:\x1b[0m
   Add to Claude Desktop config or .claude/settings.json:
-  { \"command\": \"local-voice\", \"args\": [\"serve\"] }"
-    )]
+  { \"command\": \"local-voice\", \"args\": [\"serve\"] }")]
     Serve,
 
     /// Show or modify configuration
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
   local-voice config                     Show current config
   local-voice config set speed 1.2       Set speech speed
   local-voice config set engine kokoro   Set default engine
   local-voice config set voice af_alloy  Set default voice
   local-voice config set model supertonic  Set default model
   local-voice config paths               Show file paths
-  local-voice config auto-detect         Auto-detect best engine"
-    )]
+  local-voice config auto-detect         Auto-detect best engine")]
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
 
     /// Diagnose hardware and recommend the best engine
-    #[command(
-        after_help = "\x1b[1mExamples:\x1b[0m
-  local-voice doctor                     Show hardware + recommendations"
-    )]
+    #[command(after_help = "\x1b[1mExamples:\x1b[0m
+  local-voice doctor                     Show hardware + recommendations")]
     Doctor,
 }
 
@@ -210,8 +196,7 @@ pub enum ConfigAction {
     Show,
 
     /// Set a configuration value
-    #[command(
-        after_help = "\x1b[1mKeys:\x1b[0m
+    #[command(after_help = "\x1b[1mKeys:\x1b[0m
   speed       Speech speed (routes to active engine)
   steps       Denoising steps (supertonic only)
   engine      Default engine (kokoro, piper, chatterbox, supertonic)
@@ -223,8 +208,7 @@ pub enum ConfigAction {
   kokoro.speed            Kokoro speech speed
   kokoro.default_voice    Kokoro default voice
   supertonic.speed        Supertonic speech speed
-  supertonic.steps        Supertonic denoising steps"
-    )]
+  supertonic.steps        Supertonic denoising steps")]
     Set {
         /// Config key
         key: String,

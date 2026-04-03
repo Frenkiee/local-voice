@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -81,7 +81,9 @@ impl KokoroEngine {
         // Style vector: shape [1, 256] — select the appropriate segment
         // Voice .bin files contain float32 data with shape [-1, 1, 256]
         // We pick the style for a token index (clamped to available range)
-        let style_idx = (seq_len / 2).min(self.voice_style.len() / 256).saturating_sub(1);
+        let style_idx = (seq_len / 2)
+            .min(self.voice_style.len() / 256)
+            .saturating_sub(1);
         let style_offset = style_idx * 256;
         let style_slice = if style_offset + 256 <= self.voice_style.len() {
             &self.voice_style[style_offset..style_offset + 256]
@@ -174,7 +176,10 @@ fn load_voice_style(model_dir: &Path, voice_id: &str) -> Result<Vec<f32>> {
 
     // Voice .bin files are raw float32 arrays
     if data.len() % 4 != 0 {
-        bail!("Invalid voice file: size {} is not aligned to 4 bytes", data.len());
+        bail!(
+            "Invalid voice file: size {} is not aligned to 4 bytes",
+            data.len()
+        );
     }
 
     let floats: Vec<f32> = data

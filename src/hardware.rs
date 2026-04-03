@@ -67,10 +67,7 @@ impl HardwareProfile {
         println!();
         println!("  Hardware Profile:");
         println!("    OS:       {} ({})", self.os, self.arch);
-        println!(
-            "    RAM:      {:.1} GB",
-            self.total_ram_mb as f64 / 1024.0
-        );
+        println!("    RAM:      {:.1} GB", self.total_ram_mb as f64 / 1024.0);
         println!("    CPU:      {} cores", self.cpu_cores);
         println!();
     }

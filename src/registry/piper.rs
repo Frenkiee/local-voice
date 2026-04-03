@@ -55,7 +55,9 @@ impl EngineRegistry for PiperRegistry {
 fn piper_onnx_url(id: &str) -> String {
     let (lang, rest) = id.split_once('_').unwrap_or(("en", id));
     let (country_name, quality) = rest.rsplit_once('-').unwrap_or((rest, "medium"));
-    let (country, name) = country_name.split_once('-').unwrap_or((country_name, "unknown"));
+    let (country, name) = country_name
+        .split_once('-')
+        .unwrap_or((country_name, "unknown"));
     let lang_country = format!("{lang}_{country}");
     format!("{HF_BASE}/{lang}/{lang_country}/{name}/{quality}/{lang_country}-{name}-{quality}.onnx")
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
@@ -222,7 +222,9 @@ fn handle_speak(
     // Load engine if not cached
     if !engines.contains_key(&cache_key) {
         match load_engine(&config, engine_kind, voice) {
-            Ok(e) => { engines.insert(cache_key.clone(), e); }
+            Ok(e) => {
+                engines.insert(cache_key.clone(), e);
+            }
             Err(e) => return tool_error(id, &e),
         }
     }
@@ -291,14 +293,24 @@ fn handle_set_config(
         let engine = config.default_engine.unwrap_or(EngineKind::Kokoro);
         match engine {
             EngineKind::Kokoro => {
-                config.kokoro.get_or_insert(crate::config::KokoroConfig {
-                    variant: None, speed: None, default_voice: None,
-                }).speed = Some(spd);
+                config
+                    .kokoro
+                    .get_or_insert(crate::config::KokoroConfig {
+                        variant: None,
+                        speed: None,
+                        default_voice: None,
+                    })
+                    .speed = Some(spd);
             }
             EngineKind::Supertonic => {
-                config.supertonic.get_or_insert(crate::config::SupertonicConfig {
-                    speed: None, steps: None, default_voice: None,
-                }).speed = Some(spd);
+                config
+                    .supertonic
+                    .get_or_insert(crate::config::SupertonicConfig {
+                        speed: None,
+                        steps: None,
+                        default_voice: None,
+                    })
+                    .speed = Some(spd);
             }
             _ => {}
         }
@@ -306,7 +318,10 @@ fn handle_set_config(
     }
 
     if changes.is_empty() {
-        return tool_error(id, "No config values provided. Set engine, model, voice, or speed.");
+        return tool_error(
+            id,
+            "No config values provided. Set engine, model, voice, or speed.",
+        );
     }
 
     // Clear engine cache so next speak uses new config
@@ -327,11 +342,15 @@ fn handle_get_config(id: &Option<Value>) -> Value {
         Err(e) => return tool_error(id, &format!("Failed to load config: {e}")),
     };
 
-    let engine = config.default_engine
+    let engine = config
+        .default_engine
         .map(|e| e.as_str().to_string())
         .unwrap_or_else(|| "(auto-detect)".to_string());
     let model = config.default_model.as_deref().unwrap_or("(auto)");
-    let voice = config.default_voice.as_deref().unwrap_or("(engine default)");
+    let voice = config
+        .default_voice
+        .as_deref()
+        .unwrap_or("(engine default)");
 
     let speed = match config.default_engine {
         Some(EngineKind::Kokoro) => config.kokoro_speed(),
@@ -362,7 +381,11 @@ fn handle_list_engines(id: &Option<Value>) -> Value {
     let mut lines = Vec::new();
     for kind in EngineKind::all() {
         let installed = Config::installed_models(Some(*kind)).len();
-        let rec = if *kind == recommended { " (recommended)" } else { "" };
+        let rec = if *kind == recommended {
+            " (recommended)"
+        } else {
+            ""
+        };
         let status = if installed > 0 {
             format!("{installed} model(s) installed")
         } else {
@@ -452,34 +475,50 @@ fn handle_list_voices(id: &Option<Value>, params: &Value) -> Value {
 
 // ── Engine loading helpers ──
 
-fn build_cache_key(config: &Config, engine_kind: EngineKind, voice: Option<&str>) -> Result<String, String> {
+fn build_cache_key(
+    config: &Config,
+    engine_kind: EngineKind,
+    voice: Option<&str>,
+) -> Result<String, String> {
     match engine_kind {
         EngineKind::Piper => {
-            let voice_id = config.resolve_voice(voice)
+            let voice_id = config
+                .resolve_voice(voice)
                 .ok_or("No voice configured. Install a model first.")?;
             Ok(format!("piper:{voice_id}"))
         }
         EngineKind::Kokoro => {
-            let model_id = config.resolve_model(EngineKind::Kokoro)
+            let model_id = config
+                .resolve_model(EngineKind::Kokoro)
                 .ok_or("No Kokoro model installed.")?;
-            let v = voice.or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
+            let v = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.kokoro_voice());
             Ok(format!("kokoro:{model_id}:{v}"))
         }
         EngineKind::Chatterbox => {
-            let model_id = config.resolve_model(EngineKind::Chatterbox)
+            let model_id = config
+                .resolve_model(EngineKind::Chatterbox)
                 .ok_or("No Chatterbox model installed.")?;
             Ok(format!("chatterbox:{model_id}"))
         }
         EngineKind::Supertonic => {
-            let model_id = config.resolve_model(EngineKind::Supertonic)
+            let model_id = config
+                .resolve_model(EngineKind::Supertonic)
                 .ok_or("No Supertonic model installed.")?;
-            let v = voice.or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
+            let v = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.supertonic_voice());
             Ok(format!("supertonic:{model_id}:{v}"))
         }
     }
 }
 
-fn load_engine(config: &Config, engine_kind: EngineKind, voice: Option<&str>) -> Result<Box<dyn TtsEngine>, String> {
+fn load_engine(
+    config: &Config,
+    engine_kind: EngineKind,
+    voice: Option<&str>,
+) -> Result<Box<dyn TtsEngine>, String> {
     match engine_kind {
         EngineKind::Piper => {
             let voice_id = config.resolve_voice(voice).unwrap();
@@ -490,7 +529,9 @@ fn load_engine(config: &Config, engine_kind: EngineKind, voice: Option<&str>) ->
         }
         EngineKind::Kokoro => {
             let model_id = config.resolve_model(EngineKind::Kokoro).unwrap();
-            let v = voice.or(config.default_voice.as_deref()).unwrap_or(config.kokoro_voice());
+            let v = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.kokoro_voice());
             let spd = config.kokoro_speed();
             let model_dir = Config::resolve_model_path(EngineKind::Kokoro, &model_id);
             KokoroEngine::load(&model_dir, &model_id, v, spd)
@@ -506,7 +547,9 @@ fn load_engine(config: &Config, engine_kind: EngineKind, voice: Option<&str>) ->
         }
         EngineKind::Supertonic => {
             let model_id = config.resolve_model(EngineKind::Supertonic).unwrap();
-            let v = voice.or(config.default_voice.as_deref()).unwrap_or(config.supertonic_voice());
+            let v = voice
+                .or(config.default_voice.as_deref())
+                .unwrap_or(config.supertonic_voice());
             let spd = config.supertonic_speed();
             let steps = config.supertonic_steps();
             let model_dir = Config::resolve_model_path(EngineKind::Supertonic, &model_id);
@@ -536,10 +579,7 @@ fn json_rpc_error(id: &Option<Value>, code: i32, message: &str) -> Value {
 }
 
 fn tool_result(id: &Option<Value>, text: &str) -> Value {
-    json_rpc_result(
-        id,
-        json!({ "content": [{ "type": "text", "text": text }] }),
-    )
+    json_rpc_result(id, json!({ "content": [{ "type": "text", "text": text }] }))
 }
 
 fn tool_error(id: &Option<Value>, text: &str) -> Value {

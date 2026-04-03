@@ -10,3 +10,4 @@
 *.swo
 *~
 .DS_Store
+.claude/

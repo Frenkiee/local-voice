@@ -94,7 +94,9 @@ pub fn download_plan(model_id: &str) -> anyhow::Result<Vec<DownloadItem>> {
             return reg.download_plan(model_id);
         }
     }
-    anyhow::bail!("Unknown model '{model_id}'. Run 'local-voice models list' to see available models.")
+    anyhow::bail!(
+        "Unknown model '{model_id}'. Run 'local-voice models list' to see available models."
+    )
 }
 
 /// Get all registries
@@ -139,5 +141,7 @@ pub fn voice_download_plan(voice_id: &str) -> anyhow::Result<Vec<DownloadItem>> 
             return reg.voice_download_plan(voice_id);
         }
     }
-    anyhow::bail!("Unknown voice '{voice_id}'. Run 'local-voice voices list' to see available voices.")
+    anyhow::bail!(
+        "Unknown voice '{voice_id}'. Run 'local-voice voices list' to see available voices."
+    )
 }

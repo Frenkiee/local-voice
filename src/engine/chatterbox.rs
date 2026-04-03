@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -67,9 +67,8 @@ impl ChatterboxEngine {
 
     fn encode_reference(&mut self) -> Result<SpeechEncoderOutput> {
         let audio_len = self.reference_audio.len();
-        let input =
-            Value::from_array(([1usize, audio_len], self.reference_audio.clone()))
-                .with_context(|| "Failed to create audio_values tensor")?;
+        let input = Value::from_array(([1usize, audio_len], self.reference_audio.clone()))
+            .with_context(|| "Failed to create audio_values tensor")?;
 
         let outputs = self
             .speech_encoder
@@ -169,17 +168,14 @@ impl ChatterboxEngine {
             let attention_mask = vec![1i64; total_len];
 
             // Build LLM inputs dynamically using ort inputs
-            let embeds_value =
-                Value::from_array(([1usize, seq_len, _hidden_dim], inputs_embeds))
-                    .with_context(|| "Failed to create inputs_embeds")?;
+            let embeds_value = Value::from_array(([1usize, seq_len, _hidden_dim], inputs_embeds))
+                .with_context(|| "Failed to create inputs_embeds")?;
             let attn_value = Value::from_array(([1usize, total_len], attention_mask))
                 .with_context(|| "Failed to create attention_mask")?;
 
             // Build all inputs: embeds, attn, then KV cache pairs
-            let mut input_values: Vec<ort::session::SessionInputValue<'_>> = vec![
-                embeds_value.into(),
-                attn_value.into(),
-            ];
+            let mut input_values: Vec<ort::session::SessionInputValue<'_>> =
+                vec![embeds_value.into(), attn_value.into()];
 
             for layer in 0..NUM_HIDDEN_LAYERS {
                 for kv in &["key", "value"] {
@@ -223,9 +219,7 @@ impl ChatterboxEngine {
             let next_token = penalized
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| {
-                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                })
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx as i64)
                 .unwrap_or(STOP_SPEECH_TOKEN);
 
@@ -274,14 +268,12 @@ impl ChatterboxEngine {
             .with_context(|| "Failed to create speech_tokens")?;
 
         let ref_x_len = ref_out.ref_x_vector.len();
-        let speaker_emb =
-            Value::from_array(([1usize, ref_x_len], ref_out.ref_x_vector.clone()))
-                .with_context(|| "Failed to create speaker_embeddings")?;
+        let speaker_emb = Value::from_array(([1usize, ref_x_len], ref_out.ref_x_vector.clone()))
+            .with_context(|| "Failed to create speaker_embeddings")?;
 
         let feat_len = ref_out.prompt_feat.len();
-        let speaker_feat =
-            Value::from_array(([1usize, feat_len], ref_out.prompt_feat.clone()))
-                .with_context(|| "Failed to create speaker_features")?;
+        let speaker_feat = Value::from_array(([1usize, feat_len], ref_out.prompt_feat.clone()))
+            .with_context(|| "Failed to create speaker_features")?;
 
         let outputs = self
             .cond_decoder

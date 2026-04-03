@@ -166,7 +166,9 @@ impl Config {
                     if path.is_dir() && path.join("model.onnx").exists() {
                         if let Some(name) = entry.file_name().to_str() {
                             // Skip engine subdirectories
-                            if !matches!(name, "kokoro" | "piper" | "chatterbox" | "supertonic") && !models.contains(&name.to_string()) {
+                            if !matches!(name, "kokoro" | "piper" | "chatterbox" | "supertonic")
+                                && !models.contains(&name.to_string())
+                            {
                                 models.push(name.to_string());
                             }
                         }
@@ -200,10 +202,7 @@ impl Config {
 
     /// Kokoro speed setting
     pub fn kokoro_speed(&self) -> f32 {
-        self.kokoro
-            .as_ref()
-            .and_then(|k| k.speed)
-            .unwrap_or(1.0)
+        self.kokoro.as_ref().and_then(|k| k.speed).unwrap_or(1.0)
     }
 
     /// Kokoro default voice
@@ -224,10 +223,7 @@ impl Config {
 
     /// Supertonic denoising steps
     pub fn supertonic_steps(&self) -> u32 {
-        self.supertonic
-            .as_ref()
-            .and_then(|s| s.steps)
-            .unwrap_or(5)
+        self.supertonic.as_ref().and_then(|s| s.steps).unwrap_or(5)
     }
 
     /// Supertonic default voice
@@ -245,7 +241,10 @@ impl Config {
         if let Ok(entries) = std::fs::read_dir(&voices_dir) {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
-                    if let Some(stem) = name.strip_suffix(".bin").or_else(|| name.strip_suffix(".json")) {
+                    if let Some(stem) = name
+                        .strip_suffix(".bin")
+                        .or_else(|| name.strip_suffix(".json"))
+                    {
                         voices.push(stem.to_string());
                     }
                 }
@@ -257,7 +256,9 @@ impl Config {
 
 fn has_model_files(dir: &std::path::Path, engine: EngineKind) -> bool {
     match engine {
-        EngineKind::Piper => dir.join("model.onnx").exists() && dir.join("model.onnx.json").exists(),
+        EngineKind::Piper => {
+            dir.join("model.onnx").exists() && dir.join("model.onnx.json").exists()
+        }
         EngineKind::Kokoro => dir.join("model.onnx").exists(),
         EngineKind::Chatterbox => {
             dir.join("conditional_decoder.onnx").exists()
