@@ -1,7 +1,5 @@
 use anyhow::{bail, Context, Result};
 use ort::value::Value;
-use rand::SeedableRng;
-use rand_distr::{Distribution, Normal};
 use serde::Deserialize;
 use std::path::Path;
 use unicode_normalization::UnicodeNormalization;
@@ -46,7 +44,6 @@ struct StyleComponent {
 }
 
 struct Style {
-    /// Flat f32 data + shape [batch, dim1, dim2]
     ttl_data: Vec<f32>,
     ttl_shape: [usize; 3],
     dp_data: Vec<f32>,
@@ -81,7 +78,6 @@ impl SupertonicEngine {
         speed: f32,
         total_step: u32,
     ) -> Result<Self> {
-        // Load config
         let cfg: TtsConfig = {
             let path = model_dir.join("tts.json");
             let data = std::fs::read_to_string(&path)
@@ -89,7 +85,6 @@ impl SupertonicEngine {
             serde_json::from_str(&data)?
         };
 
-        // Load unicode indexer
         let indexer: Vec<i64> = {
             let path = model_dir.join("unicode_indexer.json");
             let data = std::fs::read_to_string(&path)
@@ -97,7 +92,6 @@ impl SupertonicEngine {
             serde_json::from_str(&data)?
         };
 
-        // Load ONNX sessions
         let load_session = |name: &str| -> Result<ort::session::Session> {
             let path = model_dir.join(name);
             if !path.exists() {
@@ -114,7 +108,6 @@ impl SupertonicEngine {
         let vector_est_session = load_session("vector_estimator.onnx")?;
         let vocoder_session = load_session("vocoder.onnx")?;
 
-        // Load voice style
         let style = load_voice_style(model_dir, voice_id)?;
 
         Ok(Self {
@@ -137,28 +130,83 @@ impl SupertonicEngine {
     }
 
     fn preprocess_text(&self, text: &str, lang: &str) -> String {
+        // NFKD normalization
         let mut s: String = text.nfkd().collect();
 
-        // Remove emojis (keep basic ASCII + extended Latin + CJK + Korean)
+        // Remove emojis — match the reference regex ranges
         s = s
             .chars()
             .filter(|c| {
                 let cp = *c as u32;
-                cp < 0x1F600
-                    || (0x2E80..=0x9FFF).contains(&cp)  // CJK
-                    || (0xAC00..=0xD7AF).contains(&cp)   // Korean
-                    || (0x00C0..=0x024F).contains(&cp)    // Extended Latin
+                // Remove specific emoji/symbol ranges from the reference
+                !matches!(cp,
+                    0x1F600..=0x1F64F |  // emoticons
+                    0x1F300..=0x1F5FF |  // misc symbols & pictographs
+                    0x1F680..=0x1F6FF |  // transport & map
+                    0x1F1E0..=0x1F1FF |  // flags
+                    0x2600..=0x26FF   |  // misc symbols
+                    0x2700..=0x27BF   |  // dingbats
+                    0xFE00..=0xFE0F   |  // variation selectors
+                    0x1F900..=0x1F9FF |  // supplemental symbols
+                    0x1FA00..=0x1FA6F |  // chess symbols
+                    0x1FA70..=0x1FAFF |  // symbols extended-A
+                    0x200D              // zero width joiner
+                )
             })
             .collect();
 
-        // Normalize dashes and quotes
-        s = s.replace('\u{2014}', "-").replace('\u{2013}', "-");
+        // Replace special characters — match the reference
+        s = s.replace('_', " ");
+        s = s.replace('\u{2011}', "-"); // non-breaking hyphen
+        s = s.replace('\u{2014}', "-"); // em dash
+        s = s.replace('\u{2013}', "-"); // en dash
         s = s.replace('\u{201c}', "\"").replace('\u{201d}', "\"");
         s = s.replace('\u{2018}', "'").replace('\u{2019}', "'");
+        s = s.replace('\u{00b4}', "'"); // acute accent
+        s = s.replace('\u{0060}', "'"); // grave accent
 
-        // Ensure text ends with a period
+        // Replace brackets/symbols with spaces
+        s = s.replace('[', " ").replace(']', " ");
+        s = s.replace('(', " ").replace(')', " ");
+        s = s.replace('{', " ").replace('}', " ");
+        s = s.replace('|', " ").replace('/', " ");
+        s = s.replace('#', " ").replace('\\', " ");
+
+        // Expression replacements
+        s = s.replace('@', " at ");
+        s = s.replace("e.g.,", "for example,");
+        s = s.replace("i.e.,", "that is,");
+
+        // Remove special symbols
+        for ch in &['©', '®', '™', '♥', '♡', '★', '☆', '♪', '♫'] {
+            s = s.replace(*ch, "");
+        }
+
+        // Fix spacing around punctuation
+        // Collapse multiple spaces first
+        while s.contains("  ") {
+            s = s.replace("  ", " ");
+        }
+        s = s.replace(" ,", ",");
+        s = s.replace(" .", ".");
+        s = s.replace(" !", "!");
+        s = s.replace(" ?", "?");
+        s = s.replace(" ;", ";");
+        s = s.replace(" :", ":");
+
+        // Remove duplicate quotes
+        s = s.replace("\"\"", "\"");
+        s = s.replace("''", "'");
+
+        // Trim and ensure terminal punctuation
         let trimmed = s.trim();
-        if !trimmed.ends_with('.') && !trimmed.ends_with('!') && !trimmed.ends_with('?') {
+        let needs_period = !trimmed.is_empty()
+            && !matches!(
+                trimmed.chars().last().unwrap(),
+                '.' | '!' | '?' | ';' | ':' | ',' | '"' | '\'' | ')' | ']' | '}'
+            );
+
+        if needs_period {
             s = format!("{trimmed}.");
         } else {
             s = trimmed.to_string();
@@ -186,35 +234,33 @@ impl SupertonicEngine {
         let text_ids_raw = self.tokenize(&processed);
         let text_len = text_ids_raw.len();
 
-        // Build text_mask: [1, 1, text_len] — all 1s
+        // Build text_mask: [1, 1, text_len] — all 1s (single batch, no padding)
         let text_mask: Vec<f32> = vec![1.0; text_len];
 
-        // 1. Duration prediction
-        let dp_text_ids =
-            Value::from_array(([1usize, text_len], text_ids_raw.clone()))?;
-        let dp_style =
-            Value::from_array((self.style.dp_shape, self.style.dp_data.clone()))?;
-        let dp_mask =
-            Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
+        // 1. Duration prediction — use NAMED inputs
+        let dp_text_ids = Value::from_array(([1usize, text_len], text_ids_raw.clone()))?;
+        let dp_style = Value::from_array((self.style.dp_shape, self.style.dp_data.clone()))?;
+        let dp_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
 
-        let dp_outputs = self
-            .dp_session
-            .run(ort::inputs![dp_text_ids, dp_style, dp_mask])?;
+        let dp_outputs = self.dp_session.run(ort::inputs![
+            "text_ids" => dp_text_ids,
+            "style_dp" => dp_style,
+            "text_mask" => dp_mask
+        ])?;
 
         let (_, duration_raw) = dp_outputs[0].try_extract_tensor::<f32>()?;
         let duration = duration_raw.iter().next().copied().unwrap_or(1.0) / self.speed;
 
-        // 2. Text encoding
-        let te_text_ids =
-            Value::from_array(([1usize, text_len], text_ids_raw))?;
-        let te_style =
-            Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
-        let te_mask =
-            Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
+        // 2. Text encoding — use NAMED inputs
+        let te_text_ids = Value::from_array(([1usize, text_len], text_ids_raw))?;
+        let te_style = Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
+        let te_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
 
-        let te_outputs = self
-            .text_enc_session
-            .run(ort::inputs![te_text_ids, te_style, te_mask])?;
+        let te_outputs = self.text_enc_session.run(ort::inputs![
+            "text_ids" => te_text_ids,
+            "style_ttl" => te_style,
+            "text_mask" => te_mask
+        ])?;
 
         let (te_shape, text_emb_raw) = te_outputs[0].try_extract_tensor::<f32>()?;
         let text_emb_data = text_emb_raw.to_vec();
@@ -226,51 +272,55 @@ impl SupertonicEngine {
         let latent_len = ((wav_len + chunk_size - 1) / chunk_size).max(1) as usize;
         let latent_dim_val = (self.latent_dim * self.chunk_compress_factor) as usize;
 
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let normal = Normal::new(0.0f32, 1.0).unwrap();
-
-        let mut noisy_latent: Vec<f32> = (0..latent_dim_val * latent_len)
-            .map(|_| normal.sample(&mut rng))
+        // Use random noise (not fixed seed) like the reference
+        let mut rng = rand::rngs::ThreadRng::default();
+        let normal = rand_distr::Normal::new(0.0f32, 1.0).unwrap();
+        let noisy_latent: Vec<f32> = (0..latent_dim_val * latent_len)
+            .map(|_| rand_distr::Distribution::sample(&normal, &mut rng))
             .collect();
 
-        // Latent mask (all 1s for single-batch, no padding)
+        // Latent mask: [1, 1, latent_len] — proper mask based on wav_lengths
+        // For single batch with no padding, this is all 1s
         let latent_mask: Vec<f32> = vec![1.0; latent_len];
 
-        // 4. Denoising loop
+        // Apply mask to noisy latent (element-wise broadcast over dim 1)
+        let mut masked_latent = noisy_latent;
+        for d in 0..latent_dim_val {
+            for t in 0..latent_len {
+                masked_latent[d * latent_len + t] *= latent_mask[t];
+            }
+        }
+
+        // 4. Denoising loop — use NAMED inputs
+        let mut xt = masked_latent;
         for step in 0..self.total_step {
-            let v_latent =
-                Value::from_array(([1usize, latent_dim_val, latent_len], noisy_latent.clone()))?;
-            let v_text_emb =
-                Value::from_array((text_emb_shape, text_emb_data.clone()))?;
-            let v_style_ttl =
-                Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
-            let v_latent_mask =
-                Value::from_array(([1usize, 1, latent_len], latent_mask.clone()))?;
-            let v_text_mask =
-                Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
-            let v_current =
-                Value::from_array(([1usize], vec![step as f32]))?;
-            let v_total =
-                Value::from_array(([1usize], vec![self.total_step as f32]))?;
+            let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt.clone()))?;
+            let v_text_emb = Value::from_array((text_emb_shape, text_emb_data.clone()))?;
+            let v_style_ttl = Value::from_array((self.style.ttl_shape, self.style.ttl_data.clone()))?;
+            let v_latent_mask = Value::from_array(([1usize, 1, latent_len], latent_mask.clone()))?;
+            let v_text_mask = Value::from_array(([1usize, 1, text_len], text_mask.clone()))?;
+            let v_current = Value::from_array(([1usize], vec![step as f32]))?;
+            let v_total = Value::from_array(([1usize], vec![self.total_step as f32]))?;
 
             let ve_outputs = self.vector_est_session.run(ort::inputs![
-                v_latent,
-                v_text_emb,
-                v_style_ttl,
-                v_latent_mask,
-                v_text_mask,
-                v_current,
-                v_total
+                "noisy_latent" => v_latent,
+                "text_emb" => v_text_emb,
+                "style_ttl" => v_style_ttl,
+                "latent_mask" => v_latent_mask,
+                "text_mask" => v_text_mask,
+                "current_step" => v_current,
+                "total_step" => v_total
             ])?;
 
             let (_, denoised_raw) = ve_outputs[0].try_extract_tensor::<f32>()?;
-            noisy_latent = denoised_raw.to_vec();
+            xt = denoised_raw.to_vec();
         }
 
-        // 5. Vocoder
-        let v_latent =
-            Value::from_array(([1usize, latent_dim_val, latent_len], noisy_latent))?;
-        let voc_outputs = self.vocoder_session.run(ort::inputs![v_latent])?;
+        // 5. Vocoder — use NAMED input
+        let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt))?;
+        let voc_outputs = self.vocoder_session.run(ort::inputs![
+            "latent" => v_latent
+        ])?;
 
         let (_, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
         let mut samples = wav_raw.to_vec();
