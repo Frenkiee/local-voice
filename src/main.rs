@@ -332,16 +332,20 @@ fn handle_speak(
             })?;
 
             let kokoro_voice = voice.unwrap_or(config.kokoro_voice());
-            let _speed = speed.unwrap_or(config.kokoro_speed());
-            let _model_dir =
+            let spd = speed.unwrap_or(config.kokoro_speed());
+            let model_dir =
                 Config::resolve_model_path(engine::EngineKind::Kokoro, model_id);
 
             eprintln!(
                 "Speaking with Kokoro voice '{kokoro_voice}' (model: {model_id})..."
             );
 
-            // Kokoro engine will be implemented in Phase 4
-            bail!("Kokoro engine not yet implemented. Use --engine piper for now.")
+            Box::new(engine::kokoro::KokoroEngine::load(
+                &model_dir,
+                model_id,
+                kokoro_voice,
+                spd,
+            )?)
         }
         engine::EngineKind::Chatterbox => {
             bail!("Chatterbox engine not yet implemented. Use --engine piper for now.")

@@ -1,3 +1,4 @@
+pub mod kokoro;
 pub mod piper;
 
 use anyhow::Result;
