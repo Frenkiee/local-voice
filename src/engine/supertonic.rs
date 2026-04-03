@@ -346,21 +346,10 @@ impl SupertonicEngine {
 
 impl TtsEngine for SupertonicEngine {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput> {
-        let chunks = chunk_text(text, MAX_TEXT_LEN);
-        let mut all_samples = Vec::new();
-
-        for (i, chunk) in chunks.iter().enumerate() {
-            let samples = self.infer(chunk, "en")?;
-            all_samples.extend(samples);
-
-            if i < chunks.len() - 1 {
-                let silence = (self.sample_rate as f32 * 0.3) as usize;
-                all_samples.extend(std::iter::repeat_n(0.0f32, silence));
-            }
-        }
+        let samples = self.infer(text, "en")?;
 
         Ok(AudioOutput {
-            samples: all_samples,
+            samples,
             sample_rate: self.sample_rate as u32,
             channels: 1,
         })

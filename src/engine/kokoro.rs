@@ -112,34 +112,20 @@ impl KokoroEngine {
 
 impl TtsEngine for KokoroEngine {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput> {
-        // Phonemize the text using espeak-ng
         let phonemes = self.phonemizer.phonemize(text, "en-us")?;
         if phonemes.is_empty() {
             bail!("No phonemes generated for input text");
         }
 
-        // Split into chunks at punctuation boundaries, respecting max length
-        let chunks = split_phonemes(&phonemes, MAX_PHONEME_LENGTH);
-        let mut all_samples = Vec::new();
-
-        for chunk in &chunks {
-            let tokens = self.tokenize(chunk);
-            if tokens.is_empty() {
-                continue;
-            }
-
-            let samples = self.run_inference(&tokens)?;
-            all_samples.extend(samples);
-
-            // Add silence between chunks
-            if chunks.len() > 1 {
-                let silence = (24000.0 * 0.15) as usize;
-                all_samples.extend(std::iter::repeat_n(0.0f32, silence));
-            }
+        let tokens = self.tokenize(&phonemes);
+        if tokens.is_empty() {
+            bail!("No tokens generated from phonemes");
         }
 
+        let samples = self.run_inference(&tokens)?;
+
         Ok(AudioOutput {
-            samples: all_samples,
+            samples,
             sample_rate: 24000,
             channels: 1,
         })
