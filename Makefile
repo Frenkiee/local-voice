@@ -161,13 +161,19 @@ ifeq ($(DETECTED_OS),windows)
 	@echo '  setx PATH "%PATH%;$(INSTALL_DIR)"'
 endif
 	@echo ""
-	@echo "Quick start:"
-	@echo "  local-voice models list                         # browse voices"
-	@echo "  local-voice models install en_US-lessac-medium  # install a voice"
-	@echo "  local-voice speak \"Hello world\"                 # speak text"
-	@echo "  local-voice serve                               # start MCP server"
-	@echo ""
 	@$(MAKE) --no-print-directory mcp-install
+	@echo "── Installing default model (Supertonic) ──"
+	@echo ""
+	@"$(INSTALL_DIR)/$(BINARY)" models install supertonic || true
+	@"$(INSTALL_DIR)/$(BINARY)" voices default F2 2>/dev/null || true
+	@"$(INSTALL_DIR)/$(BINARY)" config set speed 1.1 2>/dev/null || true
+	@echo ""
+	@echo "Quick start:"
+	@echo "  local-voice speak \"Hello world\"                 # speak text"
+	@echo "  local-voice voices list                          # browse voices"
+	@echo "  local-voice                                      # interactive mode"
+	@echo "  local-voice serve                                # start MCP server"
+	@echo ""
 
 # ─── Uninstall ───────────────────────────────────────────────────────────────
 uninstall:
