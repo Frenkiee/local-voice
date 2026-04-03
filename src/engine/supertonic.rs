@@ -116,6 +116,7 @@ impl SupertonicEngine {
         eprintln!("[supertonic] VOC inputs: {:?}", vocoder_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
 
         let style = load_voice_style(model_dir, voice_id)?;
+        eprintln!("[supertonic] style_ttl shape={:?} len={}, style_dp shape={:?} len={}", style.ttl_shape, style.ttl_data.len(), style.dp_shape, style.dp_data.len());
 
         Ok(Self {
             dp_session,
@@ -319,8 +320,12 @@ impl SupertonicEngine {
                 "total_step" => v_total
             ])?;
 
-            let (_, denoised_raw) = ve_outputs[0].try_extract_tensor::<f32>()?;
+            let (ve_shape, denoised_raw) = ve_outputs[0].try_extract_tensor::<f32>()?;
             xt = denoised_raw.to_vec();
+            let xt_min = xt.iter().cloned().fold(f32::INFINITY, f32::min);
+            let xt_max = xt.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let xt_mean = xt.iter().sum::<f32>() / xt.len() as f32;
+            eprintln!("[supertonic] step {step}/{}: shape={ve_shape:?} min={xt_min:.4} max={xt_max:.4} mean={xt_mean:.6}", self.total_step);
         }
 
         // 5. Vocoder — use NAMED input
@@ -331,7 +336,10 @@ impl SupertonicEngine {
 
         let (voc_shape, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
         let mut samples = wav_raw.to_vec();
-        eprintln!("[supertonic] vocoder output shape={voc_shape:?}, samples={}", samples.len());
+        let wav_min = samples.iter().cloned().fold(f32::INFINITY, f32::min);
+        let wav_max = samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let wav_mean = samples.iter().sum::<f32>() / samples.len() as f32;
+        eprintln!("[supertonic] vocoder output shape={voc_shape:?}, samples={}, min={wav_min:.4} max={wav_max:.4} mean={wav_mean:.6}", samples.len());
 
         // Trim to actual duration
         let actual_len = (duration * self.sample_rate as f32) as usize;
