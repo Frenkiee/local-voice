@@ -1,6 +1,6 @@
 # local-voice
 
-**Local text-to-speech for your terminal and AI agents. Zero latency, zero cloud.**
+**Local text-to-speech for your terminal and AI agents. Zero latency. Zero cloud. Zero compromise.**
 
 Run open-source TTS models 100% offline. Speak from the CLI, let Claude narrate its work via MCP, or browse voices in interactive mode. All processing stays on your machine.
 
