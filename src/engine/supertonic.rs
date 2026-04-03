@@ -137,91 +137,101 @@ impl SupertonicEngine {
         })
     }
 
-    fn preprocess_text(&self, text: &str, lang: &str) -> String {
+    fn preprocess_text(&self, text: &str) -> String {
         // NFKD normalization
         let mut s: String = text.nfkd().collect();
 
-        // Remove emojis — match the reference regex ranges
+        // Remove emojis — match the Python reference regex ranges
         s = s
             .chars()
             .filter(|c| {
                 let cp = *c as u32;
-                // Remove specific emoji/symbol ranges from the reference
                 !matches!(cp,
                     0x1F600..=0x1F64F |  // emoticons
                     0x1F300..=0x1F5FF |  // misc symbols & pictographs
                     0x1F680..=0x1F6FF |  // transport & map
-                    0x1F1E0..=0x1F1FF |  // flags
+                    0x1F700..=0x1F77F |
+                    0x1F780..=0x1F7FF |
+                    0x1F800..=0x1F8FF |
+                    0x1F900..=0x1F9FF |
+                    0x1FA00..=0x1FA6F |
+                    0x1FA70..=0x1FAFF |
                     0x2600..=0x26FF   |  // misc symbols
                     0x2700..=0x27BF   |  // dingbats
-                    0xFE00..=0xFE0F   |  // variation selectors
-                    0x1F900..=0x1F9FF |  // supplemental symbols
-                    0x1FA00..=0x1FA6F |  // chess symbols
-                    0x1FA70..=0x1FAFF |  // symbols extended-A
-                    0x200D              // zero width joiner
+                    0x1F1E6..=0x1F1FF    // flags
                 )
             })
             .collect();
 
-        // Replace special characters — match the reference
-        s = s.replace('_', " ");
-        s = s.replace('\u{2011}', "-"); // non-breaking hyphen
-        s = s.replace('\u{2014}', "-"); // em dash
-        s = s.replace('\u{2013}', "-"); // en dash
-        s = s.replace('\u{201c}', "\"").replace('\u{201d}', "\"");
-        s = s.replace('\u{2018}', "'").replace('\u{2019}', "'");
-        s = s.replace('\u{00b4}', "'"); // acute accent
-        s = s.replace('\u{0060}', "'"); // grave accent
+        // Replace dashes, quotes, symbols — match Python reference exactly
+        let replacements: &[(&str, &str)] = &[
+            ("\u{2013}", "-"), ("\u{2011}", "-"), ("\u{2014}", "-"),
+            ("\u{00AF}", " "), ("_", " "),
+            ("\u{201C}", "\""), ("\u{201D}", "\""),
+            ("\u{2018}", "'"), ("\u{2019}", "'"),
+            ("\u{00B4}", "'"), ("`", "'"),
+            ("[", " "), ("]", " "),
+            ("|", " "), ("/", " "),
+            ("#", " "), ("\u{2192}", " "), ("\u{2190}", " "),
+        ];
+        for (from, to) in replacements {
+            s = s.replace(from, to);
+        }
 
-        // Replace brackets/symbols with spaces
-        s = s.replace('[', " ").replace(']', " ");
-        s = s.replace('(', " ").replace(')', " ");
-        s = s.replace('{', " ").replace('}', " ");
-        s = s.replace('|', " ").replace('/', " ");
-        s = s.replace('#', " ").replace('\\', " ");
+        // Remove combining diacritics (Python reference does this after NFKD)
+        s = s.chars().filter(|c| {
+            let cp = *c as u32;
+            !matches!(cp,
+                0x0302 | 0x0303 | 0x0304 | 0x0305 | 0x0306 | 0x0307 | 0x0308 |
+                0x030A | 0x030B | 0x030C | 0x0327 | 0x0328 | 0x0329 | 0x032A |
+                0x032B | 0x032C | 0x032D | 0x032E | 0x032F
+            )
+        }).collect();
+
+        // Remove special symbols
+        s = s.replace('\u{2665}', ""); // ♥
+        s = s.replace('\u{2606}', ""); // ☆
+        s = s.replace('\u{2661}', ""); // ♡
+        s = s.replace('\u{00A9}', ""); // ©
+        s = s.replace('\\', "");
 
         // Expression replacements
         s = s.replace('@', " at ");
-        s = s.replace("e.g.,", "for example,");
-        s = s.replace("i.e.,", "that is,");
-
-        // Remove special symbols
-        for ch in &['©', '®', '™', '♥', '♡', '★', '☆', '♪', '♫'] {
-            s = s.replace(*ch, "");
-        }
+        s = s.replace("e.g.,", "for example, ");
+        s = s.replace("i.e.,", "that is, ");
 
         // Fix spacing around punctuation
-        // Collapse multiple spaces first
-        while s.contains("  ") {
-            s = s.replace("  ", " ");
-        }
         s = s.replace(" ,", ",");
         s = s.replace(" .", ".");
         s = s.replace(" !", "!");
         s = s.replace(" ?", "?");
         s = s.replace(" ;", ";");
         s = s.replace(" :", ":");
+        s = s.replace(" '", "'");
 
         // Remove duplicate quotes
-        s = s.replace("\"\"", "\"");
-        s = s.replace("''", "'");
+        while s.contains("\"\"") { s = s.replace("\"\"", "\""); }
+        while s.contains("''") { s = s.replace("''", "'"); }
+        while s.contains("``") { s = s.replace("``", "`"); }
 
-        // Trim and ensure terminal punctuation
-        let trimmed = s.trim();
-        let needs_period = !trimmed.is_empty()
-            && !matches!(
-                trimmed.chars().last().unwrap(),
-                '.' | '!' | '?' | ';' | ':' | ',' | '"' | '\'' | ')' | ']' | '}'
-            );
+        // Collapse whitespace
+        while s.contains("  ") { s = s.replace("  ", " "); }
+        s = s.trim().to_string();
 
-        if needs_period {
-            s = format!("{trimmed}.");
-        } else {
-            s = trimmed.to_string();
+        // Add terminal period if needed — match Python regex check
+        if !s.is_empty() {
+            let last = s.chars().last().unwrap();
+            if !matches!(last,
+                '.' | '!' | '?' | ';' | ':' | ',' | '\'' | '"' |
+                ')' | ']' | '}' | '\u{2026}' | '\u{3002}' | '\u{300D}' |
+                '\u{300F}' | '\u{3011}' | '\u{3009}' | '\u{300B}' |
+                '\u{203A}' | '\u{00BB}'
+            ) {
+                s.push('.');
+            }
         }
 
-        // Wrap in language tags
-        format!("<{lang}>{s}</{lang}>")
+        s
     }
 
     fn tokenize(&self, text: &str) -> Vec<i64> {
@@ -237,8 +247,8 @@ impl SupertonicEngine {
             .collect()
     }
 
-    fn infer(&mut self, text: &str, lang: &str) -> Result<Vec<f32>> {
-        let processed = self.preprocess_text(text, lang);
+    fn infer(&mut self, text: &str) -> Result<Vec<f32>> {
+        let processed = self.preprocess_text(text);
         let text_ids_raw = self.tokenize(&processed);
         let text_len = text_ids_raw.len();
 
@@ -354,7 +364,7 @@ impl SupertonicEngine {
 
 impl TtsEngine for SupertonicEngine {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput> {
-        let samples = self.infer(text, "en")?;
+        let samples = self.infer(text)?;
 
         Ok(AudioOutput {
             samples,
