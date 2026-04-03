@@ -1,3 +1,4 @@
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Command;
 
 /// Detected hardware capabilities for auto-selecting TTS engine

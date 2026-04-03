@@ -56,10 +56,10 @@ impl Config {
 
             // Migration: if default_voice is set but default_engine is not,
             // try to detect engine from the voice ID
-            if config.default_engine.is_none() {
-                if let Some(ref voice) = config.default_voice {
-                    config.default_engine = detect_engine_from_voice(voice);
-                }
+            if config.default_engine.is_none()
+                && let Some(ref voice) = config.default_voice
+            {
+                config.default_engine = detect_engine_from_voice(voice);
             }
 
             Ok(config)
@@ -148,10 +148,10 @@ impl Config {
             let dir = Self::models_dir().join(eng.as_str());
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for entry in entries.flatten() {
-                    if has_model_files(&entry.path(), eng) {
-                        if let Some(name) = entry.file_name().to_str() {
-                            models.push(name.to_string());
-                        }
+                    if has_model_files(&entry.path(), eng)
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        models.push(name.to_string());
                     }
                 }
             }
@@ -163,14 +163,15 @@ impl Config {
             if let Ok(entries) = std::fs::read_dir(&base) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir() && path.join("model.onnx").exists() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            // Skip engine subdirectories
-                            if !matches!(name, "kokoro" | "piper" | "chatterbox" | "supertonic")
-                                && !models.contains(&name.to_string())
-                            {
-                                models.push(name.to_string());
-                            }
+                    if path.is_dir()
+                        && path.join("model.onnx").exists()
+                        && let Some(name) = entry.file_name().to_str()
+                    {
+                        // Skip engine subdirectories
+                        if !matches!(name, "kokoro" | "piper" | "chatterbox" | "supertonic")
+                            && !models.contains(&name.to_string())
+                        {
+                            models.push(name.to_string());
                         }
                     }
                 }
@@ -183,10 +184,10 @@ impl Config {
     /// Resolve which model to use for an engine: default_model (if it belongs to engine) > first installed
     pub fn resolve_model(&self, engine: EngineKind) -> Option<String> {
         // Check if default_model is set and belongs to this engine
-        if let Some(ref model_id) = self.default_model {
-            if Self::installed_engine_for(model_id) == Some(engine) {
-                return Some(model_id.clone());
-            }
+        if let Some(ref model_id) = self.default_model
+            && Self::installed_engine_for(model_id) == Some(engine)
+        {
+            return Some(model_id.clone());
         }
         // Fall back to first installed for this engine
         Self::installed_models(Some(engine)).into_iter().next()
@@ -240,13 +241,12 @@ impl Config {
         let mut voices = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&voices_dir) {
             for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if let Some(stem) = name
+                if let Some(name) = entry.file_name().to_str()
+                    && let Some(stem) = name
                         .strip_suffix(".bin")
                         .or_else(|| name.strip_suffix(".json"))
-                    {
-                        voices.push(stem.to_string());
-                    }
+                {
+                    voices.push(stem.to_string());
                 }
             }
         }

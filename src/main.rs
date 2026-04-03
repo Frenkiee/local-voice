@@ -496,10 +496,10 @@ fn handle_speak(
             let mut eng = engine::chatterbox::ChatterboxEngine::load(&model_dir, &model_id)?;
 
             // If a voice path was provided, use it for cloning
-            if let Some(v) = voice {
-                if std::path::Path::new(v).exists() {
-                    eng.set_voice(v)?;
-                }
+            if let Some(v) = voice
+                && std::path::Path::new(v).exists()
+            {
+                eng.set_voice(v)?;
             }
 
             Box::new(eng)

@@ -77,10 +77,10 @@ pub fn find_model_any_engine(id: &str) -> Option<(EngineKind, &'static ModelEntr
 pub fn search_all(language: Option<&str>, engine: Option<EngineKind>) -> Vec<&'static ModelEntry> {
     let mut results = Vec::new();
     for reg in all_registries() {
-        if let Some(e) = engine {
-            if reg.engine_kind() != e {
-                continue;
-            }
+        if let Some(e) = engine
+            && reg.engine_kind() != e
+        {
+            continue;
         }
         results.extend(reg.list_models(language));
     }
