@@ -6,7 +6,7 @@ use std::thread;
 
 use crate::engine::AudioOutput;
 
-/// Play audio through the default output device
+/// Play audio through the default output device (blocking)
 pub fn play_audio(audio: &AudioOutput) -> Result<()> {
     let source = rodio::buffer::SamplesBuffer::new(
         NonZero::new(audio.channels).unwrap(),
@@ -17,6 +17,25 @@ pub fn play_audio(audio: &AudioOutput) -> Result<()> {
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
         .with_context(|| "Failed to open audio output device")?;
     sink.log_on_drop(false);
+
+    let player = rodio::Player::connect_new(sink.mixer());
+    player.append(source);
+    player.sleep_until_end();
+
+    // Keep sink alive until playback finishes — dropping it kills audio on Windows
+    drop(player);
+    drop(sink);
+
+    Ok(())
+}
+
+/// Play audio using an existing sink (for persistent playback thread)
+fn play_audio_on_sink(audio: &AudioOutput, sink: &rodio::MixerDeviceSink) -> Result<()> {
+    let source = rodio::buffer::SamplesBuffer::new(
+        NonZero::new(audio.channels).unwrap(),
+        NonZero::new(audio.sample_rate).unwrap(),
+        audio.samples.clone(),
+    );
 
     let player = rodio::Player::connect_new(sink.mixer());
     player.append(source);
@@ -33,14 +52,25 @@ pub struct AudioQueue {
 
 impl AudioQueue {
     pub fn new() -> Self {
-        // Audio playback thread
+        // Audio playback thread — opens sink ONCE and reuses it
         let (audio_tx, audio_rx) = mpsc::sync_channel::<AudioOutput>(16);
         thread::spawn(move || {
+            let sink = match rodio::DeviceSinkBuilder::open_default_sink() {
+                Ok(mut s) => {
+                    s.log_on_drop(false);
+                    s
+                }
+                Err(e) => {
+                    eprintln!("[local-voice] Failed to open audio device: {e}");
+                    return;
+                }
+            };
             while let Ok(audio) = audio_rx.recv() {
-                if let Err(e) = play_audio(&audio) {
+                if let Err(e) = play_audio_on_sink(&audio, &sink) {
                     eprintln!("[local-voice] Playback error: {e}");
                 }
             }
+            drop(sink);
         });
 
         // Synthesis worker thread — runs jobs that produce audio, then forwards to playback
