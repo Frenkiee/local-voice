@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use ort::value::Value;
 use serde::Deserialize;
 use std::path::Path;
+#[allow(unused_imports)]
 use unicode_normalization::UnicodeNormalization;
 
 use super::{AudioOutput, EngineKind, TtsEngine, VoiceInfo};
@@ -107,6 +108,12 @@ impl SupertonicEngine {
         let text_enc_session = load_session("text_encoder.onnx")?;
         let vector_est_session = load_session("vector_estimator.onnx")?;
         let vocoder_session = load_session("vocoder.onnx")?;
+
+        // Log ONNX model input names for debugging
+        eprintln!("[supertonic] DP inputs: {:?}", dp_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
+        eprintln!("[supertonic] TE inputs: {:?}", text_enc_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
+        eprintln!("[supertonic] VE inputs: {:?}", vector_est_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
+        eprintln!("[supertonic] VOC inputs: {:?}", vocoder_session.inputs().iter().map(|i| i.name()).collect::<Vec<_>>());
 
         let style = load_voice_style(model_dir, voice_id)?;
 
@@ -234,6 +241,9 @@ impl SupertonicEngine {
         let text_ids_raw = self.tokenize(&processed);
         let text_len = text_ids_raw.len();
 
+        eprintln!("[supertonic] preprocessed: {processed}");
+        eprintln!("[supertonic] text_ids len={text_len}, first 20: {:?}", &text_ids_raw[..text_len.min(20)]);
+
         // Build text_mask: [1, 1, text_len] — all 1s (single batch, no padding)
         let text_mask: Vec<f32> = vec![1.0; text_len];
 
@@ -248,8 +258,11 @@ impl SupertonicEngine {
             "text_mask" => dp_mask
         ])?;
 
-        let (_, duration_raw) = dp_outputs[0].try_extract_tensor::<f32>()?;
-        let duration = duration_raw.iter().next().copied().unwrap_or(1.0) / self.speed;
+        let (dp_shape, duration_raw) = dp_outputs[0].try_extract_tensor::<f32>()?;
+        let dur_slice = duration_raw.as_ref();
+        eprintln!("[supertonic] duration shape={dp_shape:?}, values={dur_slice:?}");
+        let duration = dur_slice.first().copied().unwrap_or(1.0) / self.speed;
+        eprintln!("[supertonic] duration after speed={duration:.4}s");
 
         // 2. Text encoding — use NAMED inputs
         let te_text_ids = Value::from_array(([1usize, text_len], text_ids_raw))?;
@@ -264,7 +277,8 @@ impl SupertonicEngine {
 
         let (te_shape, text_emb_raw) = te_outputs[0].try_extract_tensor::<f32>()?;
         let text_emb_data = text_emb_raw.to_vec();
-        let text_emb_shape = [te_shape[0], te_shape[1], te_shape[2]];
+        let text_emb_shape = [te_shape[0] as usize, te_shape[1] as usize, te_shape[2] as usize];
+        eprintln!("[supertonic] text_emb shape={text_emb_shape:?}");
 
         // 3. Sample noisy latent
         let chunk_size = self.base_chunk_size * self.chunk_compress_factor;
@@ -272,27 +286,16 @@ impl SupertonicEngine {
         let latent_len = ((wav_len + chunk_size - 1) / chunk_size).max(1) as usize;
         let latent_dim_val = (self.latent_dim * self.chunk_compress_factor) as usize;
 
-        // Use random noise (not fixed seed) like the reference
-        let mut rng = rand::rngs::ThreadRng::default();
-        let normal = rand_distr::Normal::new(0.0f32, 1.0).unwrap();
-        let noisy_latent: Vec<f32> = (0..latent_dim_val * latent_len)
-            .map(|_| rand_distr::Distribution::sample(&normal, &mut rng))
-            .collect();
+        eprintln!("[supertonic] latent: dim={latent_dim_val}, len={latent_len}, wav_len={wav_len}");
 
-        // Latent mask: [1, 1, latent_len] — proper mask based on wav_lengths
-        // For single batch with no padding, this is all 1s
+        // Use zeros for deterministic output (no randomness)
+        let xt_init: Vec<f32> = vec![0.0; latent_dim_val * latent_len];
+
+        // Latent mask: [1, 1, latent_len]
         let latent_mask: Vec<f32> = vec![1.0; latent_len];
 
-        // Apply mask to noisy latent (element-wise broadcast over dim 1)
-        let mut masked_latent = noisy_latent;
-        for d in 0..latent_dim_val {
-            for t in 0..latent_len {
-                masked_latent[d * latent_len + t] *= latent_mask[t];
-            }
-        }
-
         // 4. Denoising loop — use NAMED inputs
-        let mut xt = masked_latent;
+        let mut xt = xt_init;
         for step in 0..self.total_step {
             let v_latent = Value::from_array(([1usize, latent_dim_val, latent_len], xt.clone()))?;
             let v_text_emb = Value::from_array((text_emb_shape, text_emb_data.clone()))?;
@@ -322,11 +325,13 @@ impl SupertonicEngine {
             "latent" => v_latent
         ])?;
 
-        let (_, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
+        let (voc_shape, wav_raw) = voc_outputs[0].try_extract_tensor::<f32>()?;
         let mut samples = wav_raw.to_vec();
+        eprintln!("[supertonic] vocoder output shape={voc_shape:?}, samples={}", samples.len());
 
         // Trim to actual duration
         let actual_len = (duration * self.sample_rate as f32) as usize;
+        eprintln!("[supertonic] trimming to {actual_len} samples (from {})", samples.len());
         if actual_len < samples.len() {
             samples.truncate(actual_len);
         }

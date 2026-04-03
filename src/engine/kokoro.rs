@@ -94,7 +94,7 @@ impl KokoroEngine {
         let style_value = Value::from_array(([1usize, 256usize], style_slice.to_vec()))
             .with_context(|| "Failed to create style tensor")?;
 
-        let speed_value = Value::from_array(([1usize], vec![self.speed as i64]))
+        let speed_value = Value::from_array(([1usize], vec![self.speed]))
             .with_context(|| "Failed to create speed tensor")?;
 
         let outputs = self
