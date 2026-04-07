@@ -27,6 +27,7 @@ tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 toml = "0.8"
 owo-colors = "4"
 dialoguer = "0.11"
+enable-ansi-support = "0.2"
 ndarray = "0.16"
 rand = "0.8"
 rand_distr = "0.4"

@@ -75,6 +75,20 @@ cargo build --release
 sudo cp target/release/local-voice /usr/local/bin/
 ```
 
+On Windows:
+```cmd
+cargo build --release
+.\target\release\local-voice.exe speak "Hello world"
+```
+
+> **Important:** Always use `--release` builds. Debug builds are significantly slower for TTS inference.
+
+> **Windows PATH:** If `make install` was used, add the install directory to PATH:
+> ```cmd
+> setx PATH "%PATH%;%USERPROFILE%\.local-voice\bin"
+> ```
+> Then restart your terminal.
+
 ### Uninstall
 
 ```bash
