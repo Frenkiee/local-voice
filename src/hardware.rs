@@ -26,11 +26,13 @@ impl HardwareProfile {
     pub fn recommended_engine(&self) -> super::engine::EngineKind {
         use super::engine::EngineKind;
 
-        if self.total_ram_mb >= 8192 {
-            // Chatterbox quantized needs ~4GB working set + model
-            EngineKind::Chatterbox
-        } else if self.total_ram_mb >= 2048 {
-            EngineKind::Kokoro
+        // Supertonic 3 is the best all-round choice on CPU: ~99M params,
+        // far faster than realtime, 31 languages, expression tags. Chatterbox
+        // is slower than realtime on CPU and only pays off for voice cloning,
+        // so it is never the default recommendation. Piper remains the
+        // fallback for very small machines.
+        if self.total_ram_mb >= 2048 {
+            EngineKind::Supertonic
         } else {
             EngineKind::Piper
         }

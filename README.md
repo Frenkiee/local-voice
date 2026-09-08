@@ -110,7 +110,7 @@ description: Use TTS to announce task starts, agent dispatches, and completions
 type: feedback
 ---
 
-Use `mcp__local-voice__speak` throughout your workflow:
+Use `mcp__local-voice__speak_async` throughout your workflow (it returns immediately; use `speak` only when the next step must wait for the audio to be queued):
 
 1. **Before starting a task** — quick notice of what you're about to do
 2. **When dispatching agents** — say how many agents and what they're doing
@@ -118,8 +118,11 @@ Use `mcp__local-voice__speak` throughout your workflow:
 4. **When a task is complete** — explain what was done in 1-2 sentences
 5. **When user needs to take action** — restart server, rebuild, install deps, etc.
 
-Keep it short — 1-2 sentences max per call.
+Keep it short — 1-2 sentences max per call. With Supertonic 3, add `<laugh>` inline
+for good news, e.g. "All tests passed <laugh> moving on."
 ```
+
+A ready-made skill with the same guidance plus the expression-tag rules lives in [`skills/local-voice-speak/SKILL.md`](skills/local-voice-speak/SKILL.md); copy it to `~/.claude/skills/local-voice-speak/` to use it in every project.
 
 **Claude Desktop** — add the instruction to your system prompt or project instructions.
 
@@ -301,7 +304,25 @@ local-voice speak "Dober dan, kako si?" --language sl
 local-voice config set language sl         # make Slovenian the default (also: supertonic.language)
 ```
 
-10 voices per model: `F1`–`F5` (female), `M1`–`M5` (male). Voice styles are model-specific, so `voices install M2` fetches the file for the model that is currently the default. Supertonic 3 also understands expression tags like `<laugh>`, `<breath>`, `<sigh>` inside the text. Language is passed as a tag around the text (`<sl>…</sl>`), so switching language needs no extra download.
+10 voices per model: `F1`–`F5` (female), `M1`–`M5` (male). Voice styles are model-specific, so `voices install M2` fetches the file for the model that is currently the default. Language is passed as a tag around the text (`<sl>…</sl>`), so switching language needs no extra download.
+
+#### Expression tags
+
+Supertonic 3 renders a few inline tags as sounds instead of words. Write them lowercase in angle brackets, mid-sentence, with no period right before the tag:
+
+```bash
+local-voice speak "The build passed <laugh> that was easier than expected."
+local-voice speak "<sigh> The deploy failed again, let me check the logs." --speed 1.0
+local-voice speak "Tajnica Tanja, vam na uslugo <laugh> kako vam lahko pomagam?" --language sl
+```
+
+| Tag | What you hear |
+|-----|---------------|
+| `<laugh>` | a short laugh (clearly audible) |
+| `<breath>`, `<sigh>`, `<cough>` | breath, sigh, cough |
+| `<hmm>`, `<mmm>`, `<uh>`, `<um>`, `<ah>`, `<oh>` | interjection sounds |
+
+Supertone advertises "10 tags" but publishes only three; the table comes from probing the model with speech recognition: any other bracketed word (`<whistle>`, `<pause>`, `<giggle>`, `<whisper>` …) is read aloud as a plain word. Square brackets never work: `[laugh]` becomes the word "laugh". One tag per sentence at most, and speed 1.0 gives tags more room than 1.1.
 
 ### Kokoro
 
