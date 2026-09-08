@@ -82,7 +82,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
             "tools": [
                 {
                     "name": "speak",
-                    "description": "Convert text to speech and play audio. Blocks during synthesis (~1-2s), then queues audio for background playback.",
+                    "description": "Convert text to speech and play audio. Blocks during synthesis (~1-2s), then queues audio for background playback. Other apps' audio is ducked while speaking (configurable).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -96,7 +96,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                 },
                 {
                     "name": "speak_async",
-                    "description": "Queue text for speech in the background. Returns immediately — synthesis and playback happen asynchronously. Best for notifications where you don't need to wait.",
+                    "description": "Queue text for speech in the background. Returns immediately — synthesis and playback happen asynchronously. Best for notifications where you don't need to wait. Other apps' audio is ducked while speaking (configurable).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -110,7 +110,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                 },
                 {
                     "name": "set_config",
-                    "description": "Configure TTS settings: engine, model, voice, and speed",
+                    "description": "Configure TTS settings: engine, model, voice, speed, language (Supertonic 2/3), and audio ducking",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -120,7 +120,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                             },
                             "model": {
                                 "type": "string",
-                                "description": "Model ID (e.g. kokoro-q8f16, supertonic, en_US-lessac-medium)"
+                                "description": "Model ID (e.g. kokoro-q8f16, supertonic-3, en_US-lessac-medium)"
                             },
                             "voice": {
                                 "type": "string",
@@ -129,6 +129,18 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                             "speed": {
                                 "type": "number",
                                 "description": "Speech speed multiplier (default 1.0)"
+                            },
+                            "language": {
+                                "type": "string",
+                                "description": "Language code for Supertonic 2/3 (e.g. en, sl, de, ja; default en)"
+                            },
+                            "ducking": {
+                                "type": "boolean",
+                                "description": "Lower other apps' audio while speaking (default true)"
+                            },
+                            "ducking_level": {
+                                "type": "number",
+                                "description": "Volume other apps are ducked to while speaking, 0..1 (default 0.2 = 20%)"
                             }
                         },
                         "required": []
@@ -136,7 +148,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                 },
                 {
                     "name": "get_config",
-                    "description": "View current TTS configuration (engine, model, voice, speed)",
+                    "description": "View current TTS configuration (engine, model, voice, speed, ducking)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},
@@ -350,6 +362,9 @@ fn handle_set_config(
 
     if let Some(speed) = args["speed"].as_f64() {
         let spd = speed as f32;
+        if !spd.is_finite() || spd <= 0.0 || spd > 10.0 {
+            return tool_error(id, "Invalid speed: must be between 0 (exclusive) and 10");
+        }
         // Set speed on the active engine's config
         let engine = config.default_engine.unwrap_or(EngineKind::Kokoro);
         match engine {
@@ -364,24 +379,42 @@ fn handle_set_config(
                     .speed = Some(spd);
             }
             EngineKind::Supertonic => {
-                config
-                    .supertonic
-                    .get_or_insert(crate::config::SupertonicConfig {
-                        speed: None,
-                        steps: None,
-                        default_voice: None,
-                    })
-                    .speed = Some(spd);
+                config.supertonic.get_or_insert_default().speed = Some(spd);
             }
             _ => {}
         }
         changes.push(format!("speed={spd}"));
     }
 
+    if let Some(lang) = args["language"].as_str() {
+        if let Err(e) = registry::supertonic::validate_language(lang) {
+            return tool_error(id, &format!("{e}"));
+        }
+        config.supertonic.get_or_insert_default().language = Some(lang.trim().to_lowercase());
+        changes.push(format!("language={lang}"));
+    }
+
+    if let Some(enabled) = args["ducking"].as_bool() {
+        config.ducking.get_or_insert_default().enabled = Some(enabled);
+        changes.push(format!("ducking={}", if enabled { "on" } else { "off" }));
+    }
+
+    if let Some(level) = args["ducking_level"].as_f64() {
+        if !(0.0..=1.0).contains(&level) {
+            return tool_error(
+                id,
+                &format!("Invalid ducking_level {level}: must be between 0 and 1"),
+            );
+        }
+        let level = level as f32;
+        config.ducking.get_or_insert_default().level = Some(level);
+        changes.push(format!("ducking_level={level}"));
+    }
+
     if changes.is_empty() {
         return tool_error(
             id,
-            "No config values provided. Set engine, model, voice, or speed.",
+            "No config values provided. Set engine, model, voice, speed, language, ducking, or ducking_level.",
         );
     }
 
@@ -428,6 +461,17 @@ fn handle_get_config(id: &Option<Value>) -> Value {
 
     if config.default_engine == Some(EngineKind::Supertonic) {
         lines.push(format!("steps: {}", config.supertonic_steps()));
+        lines.push(format!("language: {}", config.supertonic_language()));
+    }
+
+    let ducking = config.ducking_settings();
+    if ducking.enabled {
+        lines.push(format!(
+            "ducking: on (level {}%)",
+            (ducking.level * 100.0).round() as u32
+        ));
+    } else {
+        lines.push("ducking: off".to_string());
     }
 
     tool_result(id, &lines.join("\n"))
@@ -613,8 +657,9 @@ fn load_engine(
                 .unwrap_or(config.supertonic_voice());
             let spd = config.supertonic_speed();
             let steps = config.supertonic_steps();
+            let lang = config.supertonic_language();
             let model_dir = Config::resolve_model_path(EngineKind::Supertonic, &model_id);
-            SupertonicEngine::load(&model_dir, &model_id, v, spd, steps)
+            SupertonicEngine::load(&model_dir, &model_id, v, spd, steps, lang)
                 .map(|e| Box::new(e) as Box<dyn TtsEngine>)
                 .map_err(|e| format!("Failed to load Supertonic: {e}"))
         }

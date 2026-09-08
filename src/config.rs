@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::ducking::DuckingSettings;
 use crate::engine::EngineKind;
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -13,6 +14,7 @@ pub struct Config {
     pub kokoro: Option<KokoroConfig>,
     pub chatterbox: Option<ChatterboxConfig>,
     pub supertonic: Option<SupertonicConfig>,
+    pub ducking: Option<DuckingConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,11 +30,23 @@ pub struct ChatterboxConfig {
     pub reference_audio: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SupertonicConfig {
     pub speed: Option<f32>,
     pub steps: Option<u32>,
     pub default_voice: Option<String>,
+    /// Language code for multilingual models (Supertonic 2/3), e.g. "en", "sl"
+    pub language: Option<String>,
+}
+
+/// Audio ducking (lower other apps' volume while speaking). All fields are
+/// optional so older config files keep loading; see [`Config::ducking_settings`]
+/// for the resolved defaults.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct DuckingConfig {
+    pub enabled: Option<bool>,
+    pub level: Option<f32>,
+    pub fade_ms: Option<u64>,
 }
 
 impl Config {
@@ -227,12 +241,34 @@ impl Config {
         self.supertonic.as_ref().and_then(|s| s.steps).unwrap_or(5)
     }
 
+    /// Supertonic language code (used by Supertonic 2/3; v1 is English only)
+    pub fn supertonic_language(&self) -> &str {
+        self.supertonic
+            .as_ref()
+            .and_then(|s| s.language.as_deref())
+            .unwrap_or("en")
+    }
+
     /// Supertonic default voice
     pub fn supertonic_voice(&self) -> &str {
         self.supertonic
             .as_ref()
             .and_then(|s| s.default_voice.as_deref())
             .unwrap_or("F1")
+    }
+
+    /// Resolved ducking settings (config values over defaults: on, 20 %, 300 ms)
+    pub fn ducking_settings(&self) -> DuckingSettings {
+        let d = self.ducking.as_ref();
+        let defaults = DuckingSettings::default();
+        DuckingSettings {
+            enabled: d.and_then(|d| d.enabled).unwrap_or(defaults.enabled),
+            level: d
+                .and_then(|d| d.level)
+                .unwrap_or(defaults.level)
+                .clamp(0.0, 1.0),
+            fade_ms: d.and_then(|d| d.fade_ms).unwrap_or(defaults.fade_ms),
+        }
     }
 
     /// List installed voice files for an engine+model combo
@@ -284,5 +320,59 @@ fn detect_engine_from_voice(voice: &str) -> Option<EngineKind> {
         Some(EngineKind::Supertonic)
     } else {
         Some(EngineKind::Piper)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supertonic_language_defaults_to_en_and_parses() {
+        let config: Config = toml::from_str("[supertonic]\nspeed = 1.1\n").unwrap();
+        assert_eq!(config.supertonic_language(), "en");
+        let config: Config = toml::from_str("[supertonic]\nlanguage = \"sl\"\n").unwrap();
+        assert_eq!(config.supertonic_language(), "sl");
+    }
+
+    #[test]
+    fn ducking_defaults_when_section_missing() {
+        let config: Config = toml::from_str("default_engine = \"kokoro\"\n").unwrap();
+        assert!(config.ducking.is_none());
+        let s = config.ducking_settings();
+        assert!(s.enabled);
+        assert_eq!(s.level, 0.2);
+        assert_eq!(s.fade_ms, 300);
+        assert_eq!(s, DuckingSettings::default());
+    }
+
+    #[test]
+    fn ducking_section_parses_and_overrides() {
+        let config: Config = toml::from_str("[ducking]\nenabled = false\n").unwrap();
+        let s = config.ducking_settings();
+        assert!(!s.enabled);
+        assert_eq!(s.level, 0.2);
+        assert_eq!(s.fade_ms, 300);
+
+        let config: Config = toml::from_str("[ducking]\nlevel = 0.5\nfade_ms = 100\n").unwrap();
+        let s = config.ducking_settings();
+        assert!(s.enabled);
+        assert_eq!(s.level, 0.5);
+        assert_eq!(s.fade_ms, 100);
+    }
+
+    #[test]
+    fn ducking_round_trips_through_save_format() {
+        let config = Config {
+            ducking: Some(DuckingConfig {
+                enabled: Some(false),
+                level: None,
+                fade_ms: None,
+            }),
+            ..Default::default()
+        };
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(!back.ducking_settings().enabled);
     }
 }

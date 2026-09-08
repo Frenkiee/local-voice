@@ -90,6 +90,14 @@ static VARIANTS: &[KokoroVariant] = &[
         id: "kokoro-q4f16",
         file: "onnx/model_q4f16.onnx",
     },
+    KokoroVariant {
+        id: "kokoro-uint8f16",
+        file: "onnx/model_uint8f16.onnx",
+    },
+    KokoroVariant {
+        id: "kokoro-quantized",
+        file: "onnx/model_quantized.onnx",
+    },
 ];
 
 pub static MODELS: &[ModelEntry] = &[
@@ -119,8 +127,8 @@ pub static MODELS: &[ModelEntry] = &[
         name: "Kokoro Q8F16",
         language: "multi",
         quality: "medium",
-        description: "8-bit quantized — good quality, 114 MB",
-        size_mb: 114,
+        description: "8-bit weights / fp16 activations — good quality, 86 MB",
+        size_mb: 86,
         sample_rate: 24000,
     },
     ModelEntry {
@@ -129,12 +137,34 @@ pub static MODELS: &[ModelEntry] = &[
         name: "Kokoro Q4F16",
         language: "multi",
         quality: "medium",
-        description: "4-bit quantized — compact, 154 MB",
-        size_mb: 154,
+        description: "4-bit quantized — 155 MB",
+        size_mb: 155,
+        sample_rate: 24000,
+    },
+    ModelEntry {
+        id: "kokoro-uint8f16",
+        engine: EngineKind::Kokoro,
+        name: "Kokoro UINT8F16",
+        language: "multi",
+        quality: "medium",
+        description: "uint8 weights / fp16 activations — 114 MB",
+        size_mb: 114,
+        sample_rate: 24000,
+    },
+    ModelEntry {
+        id: "kokoro-quantized",
+        engine: EngineKind::Kokoro,
+        name: "Kokoro INT8",
+        language: "multi",
+        quality: "medium",
+        description: "Fully int8 quantized — 92 MB",
+        size_mb: 92,
         sample_rate: 24000,
     },
 ];
 
+/// All 54 voices shipped in onnx-community/Kokoro-82M-v1.0-ONNX (each `.bin` is 522,240 bytes).
+/// The first letter of the ID selects the language (see `engine::kokoro::espeak_voice_for`).
 pub static VOICES: &[VoiceEntry] = &[
     // American Female
     VoiceEntry {
@@ -146,6 +176,12 @@ pub static VOICES: &[VoiceEntry] = &[
     VoiceEntry {
         id: "af_aoede",
         name: "Aoede",
+        language: "en-US",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "af_heart",
+        name: "Heart",
         language: "en-US",
         gender: "F",
     },
@@ -246,6 +282,12 @@ pub static VOICES: &[VoiceEntry] = &[
         language: "en-US",
         gender: "M",
     },
+    VoiceEntry {
+        id: "am_santa",
+        name: "Santa",
+        language: "en-US",
+        gender: "M",
+    },
     // British Female
     VoiceEntry {
         id: "bf_alice",
@@ -294,6 +336,170 @@ pub static VOICES: &[VoiceEntry] = &[
         id: "bm_lewis",
         name: "Lewis",
         language: "en-GB",
+        gender: "M",
+    },
+    // Spanish
+    VoiceEntry {
+        id: "ef_dora",
+        name: "Dora",
+        language: "es",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "em_alex",
+        name: "Alex",
+        language: "es",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "em_santa",
+        name: "Santa",
+        language: "es",
+        gender: "M",
+    },
+    // French
+    VoiceEntry {
+        id: "ff_siwis",
+        name: "Siwis",
+        language: "fr-FR",
+        gender: "F",
+    },
+    // Hindi
+    VoiceEntry {
+        id: "hf_alpha",
+        name: "Alpha",
+        language: "hi",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "hf_beta",
+        name: "Beta",
+        language: "hi",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "hm_omega",
+        name: "Omega",
+        language: "hi",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "hm_psi",
+        name: "Psi",
+        language: "hi",
+        gender: "M",
+    },
+    // Italian
+    VoiceEntry {
+        id: "if_sara",
+        name: "Sara",
+        language: "it",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "im_nicola",
+        name: "Nicola",
+        language: "it",
+        gender: "M",
+    },
+    // Brazilian Portuguese
+    VoiceEntry {
+        id: "pf_dora",
+        name: "Dora",
+        language: "pt-BR",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "pm_alex",
+        name: "Alex",
+        language: "pt-BR",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "pm_santa",
+        name: "Santa",
+        language: "pt-BR",
+        gender: "M",
+    },
+    // Japanese — experimental: upstream Kokoro phonemizes ja/zh with misaki, we
+    // use espeak-ng (`ja` / `cmn`), so pronunciation quality is lower.
+    VoiceEntry {
+        id: "jf_alpha",
+        name: "Alpha",
+        language: "ja",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "jf_gongitsune",
+        name: "Gongitsune",
+        language: "ja",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "jf_nezumi",
+        name: "Nezumi",
+        language: "ja",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "jf_tebukuro",
+        name: "Tebukuro",
+        language: "ja",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "jm_kumo",
+        name: "Kumo",
+        language: "ja",
+        gender: "M",
+    },
+    // Mandarin Chinese — experimental (see Japanese note above)
+    VoiceEntry {
+        id: "zf_xiaobei",
+        name: "Xiaobei",
+        language: "zh",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "zf_xiaoni",
+        name: "Xiaoni",
+        language: "zh",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "zf_xiaoxiao",
+        name: "Xiaoxiao",
+        language: "zh",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "zf_xiaoyi",
+        name: "Xiaoyi",
+        language: "zh",
+        gender: "F",
+    },
+    VoiceEntry {
+        id: "zm_yunjian",
+        name: "Yunjian",
+        language: "zh",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "zm_yunxi",
+        name: "Yunxi",
+        language: "zh",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "zm_yunxia",
+        name: "Yunxia",
+        language: "zh",
+        gender: "M",
+    },
+    VoiceEntry {
+        id: "zm_yunyang",
+        name: "Yunyang",
+        language: "zh",
         gender: "M",
     },
 ];

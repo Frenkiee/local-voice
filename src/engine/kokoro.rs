@@ -19,6 +19,62 @@ pub struct KokoroEngine {
     phonemizer: Phonemizer,
 }
 
+/// Pick the espeak-ng voice used to phonemize text for a Kokoro voice.
+///
+/// Kokoro voice IDs encode the language in their first letter
+/// (`af_heart` = American English female, `jf_alpha` = Japanese female, ...).
+/// Upstream Kokoro uses misaki for Japanese and Chinese; espeak-ng phonemes are
+/// an approximation there, so those voices are marked experimental.
+pub fn espeak_voice_for(voice_id: &str) -> &'static str {
+    match voice_id.chars().next() {
+        Some('a') => "en-us",
+        Some('b') => "en-gb",
+        Some('e') => "es",
+        Some('f') => "fr-fr",
+        Some('h') => "hi",
+        Some('i') => "it",
+        Some('p') => "pt-br",
+        Some('j') => "ja",
+        Some('z') => "cmn",
+        _ => "en-us",
+    }
+}
+
+/// Voices whose upstream phonemizer (misaki) is not espeak-ng; output quality
+/// with espeak phonemes is noticeably lower.
+pub fn is_experimental(voice_id: &str) -> bool {
+    matches!(voice_id.chars().next(), Some('j') | Some('z'))
+}
+
+/// Remove espeak-ng language-switch markers such as `(en)` / `(ja)` that appear
+/// when a word from another language is embedded in the text. Parentheses and
+/// Latin letters are valid Kokoro tokens, so leaving the markers in would be
+/// tokenized as spurious phonemes.
+fn strip_lang_markers(phonemes: &str) -> String {
+    let mut out = String::with_capacity(phonemes.len());
+    let mut rest = phonemes;
+    while let Some(start) = rest.find('(') {
+        let after = &rest[start + 1..];
+        match after.find(')') {
+            Some(end)
+                if !after[..end].is_empty()
+                    && after[..end]
+                        .chars()
+                        .all(|c| c.is_ascii_alphabetic() || c == '-') =>
+            {
+                out.push_str(&rest[..start]);
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..=start]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 impl KokoroEngine {
     pub fn load(model_dir: &Path, model_id: &str, voice_id: &str, speed: f32) -> Result<Self> {
         let onnx_path = model_dir.join("model.onnx");
@@ -113,7 +169,8 @@ impl KokoroEngine {
 
 impl TtsEngine for KokoroEngine {
     fn synthesize(&mut self, text: &str) -> Result<AudioOutput> {
-        let phonemes = self.phonemizer.phonemize(text, "en-us")?;
+        let espeak_voice = espeak_voice_for(&self.voice_id);
+        let phonemes = strip_lang_markers(&self.phonemizer.phonemize(text, espeak_voice)?);
         if phonemes.is_empty() {
             bail!("No phonemes generated for input text");
         }
@@ -147,7 +204,11 @@ impl TtsEngine for KokoroEngine {
                 id: v.id.to_string(),
                 name: v.name.to_string(),
                 language: v.language.to_string(),
-                description: format!("{} ({})", v.name, v.gender),
+                description: if is_experimental(v.id) {
+                    format!("{} ({}) — experimental (espeak phonemes)", v.name, v.gender)
+                } else {
+                    format!("{} ({})", v.name, v.gender)
+                },
             })
             .collect()
     }
@@ -322,4 +383,48 @@ fn build_vocab() -> HashMap<String, i64> {
     v.insert("↘".into(), 173);
     v.insert("ᵻ".into(), 177);
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn espeak_voice_follows_kokoro_prefix() {
+        assert_eq!(espeak_voice_for("af_heart"), "en-us");
+        assert_eq!(espeak_voice_for("bm_george"), "en-gb");
+        assert_eq!(espeak_voice_for("ef_dora"), "es");
+        assert_eq!(espeak_voice_for("ff_siwis"), "fr-fr");
+        assert_eq!(espeak_voice_for("hm_psi"), "hi");
+        assert_eq!(espeak_voice_for("if_sara"), "it");
+        assert_eq!(espeak_voice_for("pm_alex"), "pt-br");
+        assert_eq!(espeak_voice_for("jf_alpha"), "ja");
+        assert_eq!(espeak_voice_for("zm_yunyang"), "cmn");
+        assert_eq!(espeak_voice_for(""), "en-us");
+    }
+
+    #[test]
+    fn every_registry_voice_has_a_known_prefix() {
+        for v in VOICES {
+            assert!(
+                "abefhipjz".contains(v.id.chars().next().unwrap()),
+                "unexpected prefix for {}",
+                v.id
+            );
+        }
+        assert!(is_experimental("jf_nezumi"));
+        assert!(is_experimental("zf_xiaoxiao"));
+        assert!(!is_experimental("af_heart"));
+    }
+
+    #[test]
+    fn strips_language_switch_markers() {
+        assert_eq!(strip_lang_markers("(en)_tʃ_ˈaɪ_(ja)_l_ˈe"), "_tʃ_ˈaɪ__l_ˈe");
+        assert_eq!(strip_lang_markers("(en-us)hi"), "hi");
+        // Real parentheses in prosody / punctuation are kept.
+        assert_eq!(strip_lang_markers("a (ˈb) c"), "a (ˈb) c");
+        assert_eq!(strip_lang_markers("()"), "()");
+        assert_eq!(strip_lang_markers("(unclosed"), "(unclosed");
+        assert_eq!(strip_lang_markers("plain"), "plain");
+    }
 }

@@ -2,6 +2,7 @@ mod audio;
 mod cli;
 mod config;
 mod download;
+mod ducking;
 mod engine;
 mod hardware;
 mod mcp;
@@ -32,15 +33,23 @@ async fn main() -> Result<()> {
             voice,
             engine,
             speed,
+            language,
             output,
             no_play,
+            no_ducking,
+            ducking_level,
         }) => handle_speak(
             &text,
             voice.as_deref(),
             engine.as_deref(),
             speed,
+            language.as_deref(),
             output.as_deref(),
             no_play,
+            SpeakDucking {
+                disable: no_ducking,
+                level: ducking_level,
+            },
         )?,
         Some(Commands::Serve) => mcp::run_server()?,
         Some(Commands::Config { action }) => handle_config(action)?,
@@ -204,10 +213,21 @@ async fn handle_models(action: ModelAction) -> Result<()> {
             );
             println!();
 
-            if engine_kind == engine::EngineKind::Kokoro {
-                println!("  Try it: local-voice speak 'Hello, world!'");
-            } else {
-                println!("  Try it: local-voice speak 'Hello, world!' --voice {id}");
+            match engine_kind {
+                engine::EngineKind::Kokoro => {
+                    println!("  Try it: local-voice speak 'Hello, world!'");
+                }
+                engine::EngineKind::Supertonic => {
+                    println!("  Try it: local-voice speak 'Hello, world!' --voice F1");
+                    if registry::supertonic::supported_languages(&id)
+                        .is_some_and(|l| l.contains(&"sl"))
+                    {
+                        println!("          local-voice speak 'Dober dan!' --language sl");
+                    }
+                }
+                _ => {
+                    println!("  Try it: local-voice speak 'Hello, world!' --voice {id}");
+                }
             }
 
             let mut config = Config::load()?;
@@ -287,22 +307,29 @@ async fn handle_voices(action: Option<VoiceAction>) -> Result<()> {
                     )
                 })?;
 
-            // Find installed model for this engine to know where to put the voice
-            let models = Config::installed_models(Some(engine_kind));
-            let model_id = models.first().ok_or_else(|| {
+            // Find the active model for this engine to know where to put the voice
+            // (default model if it belongs to this engine, else first installed)
+            let config = Config::load()?;
+            let model_id = config.resolve_model(engine_kind).ok_or_else(|| {
                 anyhow::anyhow!(
                     "No {} model installed. Install one first: local-voice models install {}",
                     engine_kind,
                     match engine_kind {
                         engine::EngineKind::Kokoro => "kokoro-q8f16",
-                        engine::EngineKind::Supertonic => "supertonic",
+                        engine::EngineKind::Supertonic => registry::supertonic::RECOMMENDED_MODEL,
                         _ => "<model>",
                     }
                 )
             })?;
 
-            let model_dir = Config::resolve_model_path(engine_kind, model_id);
-            let plan = registry::voice_download_plan(&id)?;
+            let model_dir = Config::resolve_model_path(engine_kind, &model_id);
+            // Supertonic voice styles are model-specific: fetch from the installed model's repo
+            let plan = match engine_kind {
+                engine::EngineKind::Supertonic => {
+                    registry::supertonic::voice_download_plan_for_model(&model_id, &id)?
+                }
+                _ => registry::voice_download_plan(&id)?,
+            };
 
             println!(
                 "Installing voice '{}' for {} (model: {model_id})...",
@@ -325,12 +352,11 @@ async fn handle_voices(action: Option<VoiceAction>) -> Result<()> {
             let (engine_kind, _) = registry::find_voice_any_engine(&id)
                 .ok_or_else(|| anyhow::anyhow!("Unknown voice '{id}'."))?;
 
-            let models = Config::installed_models(Some(engine_kind));
-            let model_id = models
-                .first()
+            let model_id = Config::load()?
+                .resolve_model(engine_kind)
                 .ok_or_else(|| anyhow::anyhow!("No {} model installed.", engine_kind))?;
 
-            let model_dir = Config::resolve_model_path(engine_kind, model_id);
+            let model_dir = Config::resolve_model_path(engine_kind, &model_id);
 
             // Determine voice file extension
             let voice_file = match engine_kind {
@@ -413,15 +439,42 @@ fn show_voices_for_engines(engines: &[engine::EngineKind]) -> Result<()> {
     Ok(())
 }
 
+/// One-run ducking overrides from the `speak` command line.
+#[derive(Debug, Clone, Copy, Default)]
+struct SpeakDucking {
+    /// `--no-ducking`
+    disable: bool,
+    /// `--ducking-level <0..1>`
+    level: Option<f32>,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_speak(
     text: &str,
     voice: Option<&str>,
     engine_name: Option<&str>,
     speed: Option<f32>,
+    language: Option<&str>,
     output: Option<&std::path::Path>,
     no_play: bool,
+    ducking_override: SpeakDucking,
 ) -> Result<()> {
+    if let Some(s) = speed {
+        validate_speed(s)?;
+    }
     let config = Config::load()?;
+
+    // Ducking: config, then per-run CLI overrides.
+    let mut ducking_settings = config.ducking_settings();
+    if ducking_override.disable {
+        ducking_settings.enabled = false;
+    }
+    if let Some(level) = ducking_override.level {
+        if !(0.0..=1.0).contains(&level) {
+            bail!("Invalid --ducking-level {level}: must be between 0 and 1");
+        }
+        ducking_settings.level = level;
+    }
 
     let engine_kind = match engine_name {
         Some(e) => e.parse::<engine::EngineKind>()?,
@@ -513,7 +566,7 @@ fn handle_speak(
                 .resolve_model(engine::EngineKind::Supertonic)
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "No Supertonic model installed. Run: local-voice models install supertonic"
+                        "No Supertonic model installed. Run: local-voice models install supertonic-3"
                     )
                 })?;
 
@@ -522,12 +575,15 @@ fn handle_speak(
                 .unwrap_or(config.supertonic_voice());
             let spd = speed.unwrap_or(config.supertonic_speed());
             let steps = config.supertonic_steps();
+            let lang = language.unwrap_or(config.supertonic_language());
             let model_dir = Config::resolve_model_path(engine::EngineKind::Supertonic, &model_id);
 
-            eprintln!("Speaking with Supertonic voice '{st_voice}' (model: {model_id})...");
+            eprintln!(
+                "Speaking with Supertonic voice '{st_voice}' (model: {model_id}, language: {lang})..."
+            );
 
             Box::new(engine::supertonic::SupertonicEngine::load(
-                &model_dir, &model_id, st_voice, spd, steps,
+                &model_dir, &model_id, st_voice, spd, steps, lang,
             )?)
         }
     };
@@ -540,10 +596,35 @@ fn handle_speak(
     }
 
     if !no_play {
-        audio::play_audio(&audio_output)?;
+        audio::play_audio(&audio_output, &ducking_settings)?;
     }
 
     Ok(())
+}
+
+/// Parse a user-supplied boolean: on/off, true/false, yes/no, 1/0.
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" | "yes" | "1" => Some(true),
+        "off" | "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// Parse a speech-speed multiplier; must be a finite number greater than zero
+/// (a speed of 0 would make engines size infinite buffers).
+fn parse_speed(value: &str) -> Result<f32> {
+    let speed: f32 = value
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid speed: {value}"))?;
+    validate_speed(speed)
+}
+
+fn validate_speed(speed: f32) -> Result<f32> {
+    if !speed.is_finite() || speed <= 0.0 || speed > 10.0 {
+        bail!("Invalid speed {speed}: must be between 0 (exclusive) and 10");
+    }
+    Ok(speed)
 }
 
 fn handle_config(action: Option<ConfigAction>) -> Result<()> {
@@ -578,11 +659,22 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
             println!("    speed:      {speed}");
             if config.default_engine == Some(engine::EngineKind::Supertonic) {
                 println!("    steps:      {}", config.supertonic_steps());
+                println!("    language:   {}", config.supertonic_language());
             }
             println!(
                 "    output_dir: {}",
                 config.output_dir.as_deref().unwrap_or("(not set)").dimmed()
             );
+            let ducking = config.ducking_settings();
+            if ducking.enabled {
+                println!(
+                    "    ducking:    on (level {}%, fade {}ms)",
+                    (ducking.level * 100.0).round() as u32,
+                    ducking.fade_ms
+                );
+            } else {
+                println!("    ducking:    {}", "off".dimmed());
+            }
             println!();
         }
 
@@ -590,9 +682,7 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
             match key.as_str() {
                 // Top-level shortcuts
                 "speed" => {
-                    let speed: f32 = value
-                        .parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid speed: {value}"))?;
+                    let speed = parse_speed(&value)?;
                     let eng = config.default_engine.unwrap_or(engine::EngineKind::Kokoro);
                     match eng {
                         engine::EngineKind::Kokoro => {
@@ -606,14 +696,7 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                                 .speed = Some(speed);
                         }
                         engine::EngineKind::Supertonic => {
-                            config
-                                .supertonic
-                                .get_or_insert(config::SupertonicConfig {
-                                    speed: None,
-                                    steps: None,
-                                    default_voice: None,
-                                })
-                                .speed = Some(speed);
+                            config.supertonic.get_or_insert_default().speed = Some(speed);
                         }
                         _ => {
                             // Set both for convenience
@@ -632,14 +715,12 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                     let steps: u32 = value
                         .parse()
                         .map_err(|_| anyhow::anyhow!("Invalid steps: {value}"))?;
-                    config
-                        .supertonic
-                        .get_or_insert(config::SupertonicConfig {
-                            speed: None,
-                            steps: None,
-                            default_voice: None,
-                        })
-                        .steps = Some(steps);
+                    config.supertonic.get_or_insert_default().steps = Some(steps);
+                }
+                "language" | "supertonic.language" => {
+                    registry::supertonic::validate_language(&value)?;
+                    config.supertonic.get_or_insert_default().language =
+                        Some(value.trim().to_lowercase());
                 }
                 "engine" | "default_engine" => {
                     let eng: engine::EngineKind = value.parse()?;
@@ -663,11 +744,34 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                     }
                 }
                 "output_dir" => config.output_dir = Some(value.clone()),
+                // Ducking keys
+                "ducking" | "ducking.enabled" => {
+                    let enabled = parse_bool(&value).ok_or_else(|| {
+                        anyhow::anyhow!("Invalid value '{value}': use on, off, true, false, 1, 0")
+                    })?;
+                    config.ducking.get_or_insert_default().enabled = Some(enabled);
+                }
+                "ducking.level" => {
+                    let level: f32 = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid ducking level: {value}"))?;
+                    if !(0.0..=1.0).contains(&level) {
+                        bail!("Invalid ducking level {value}: must be between 0 and 1");
+                    }
+                    config.ducking.get_or_insert_default().level = Some(level);
+                }
+                "ducking.fade_ms" => {
+                    let fade_ms: u64 = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid ducking fade: {value}"))?;
+                    if fade_ms > 5000 {
+                        bail!("Invalid ducking fade {value}: must be at most 5000 ms");
+                    }
+                    config.ducking.get_or_insert_default().fade_ms = Some(fade_ms);
+                }
                 // Engine-specific keys
                 "kokoro.speed" => {
-                    let speed: f32 = value
-                        .parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid speed: {value}"))?;
+                    let speed = parse_speed(&value)?;
                     config
                         .kokoro
                         .get_or_insert(config::KokoroConfig {
@@ -688,30 +792,14 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                         .default_voice = Some(value.clone());
                 }
                 "supertonic.speed" => {
-                    let speed: f32 = value
-                        .parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid speed: {value}"))?;
-                    config
-                        .supertonic
-                        .get_or_insert(config::SupertonicConfig {
-                            speed: None,
-                            steps: None,
-                            default_voice: None,
-                        })
-                        .speed = Some(speed);
+                    let speed = parse_speed(&value)?;
+                    config.supertonic.get_or_insert_default().speed = Some(speed);
                 }
                 "supertonic.steps" => {
                     let steps: u32 = value
                         .parse()
                         .map_err(|_| anyhow::anyhow!("Invalid steps: {value}"))?;
-                    config
-                        .supertonic
-                        .get_or_insert(config::SupertonicConfig {
-                            speed: None,
-                            steps: None,
-                            default_voice: None,
-                        })
-                        .steps = Some(steps);
+                    config.supertonic.get_or_insert_default().steps = Some(steps);
                 }
                 _ => bail!(
                     "Unknown key '{key}'. Run 'local-voice config set --help' for valid keys."
@@ -804,6 +892,72 @@ fn handle_doctor() -> Result<()> {
     }
     println!();
 
+    // ── Ducking self-test ──
+    println!("  {}", "Ducking:".bold());
+    println!(
+        "    {:<12} {} ({})",
+        "backend",
+        std::env::consts::OS,
+        ducking::backend_name().dimmed()
+    );
+    let ducking = Config::load()
+        .map(|c| c.ducking_settings())
+        .unwrap_or_default();
+    if ducking.enabled {
+        println!(
+            "    {:<12} on (level {}%, fade {}ms)",
+            "config",
+            (ducking.level * 100.0).round() as u32,
+            ducking.fade_ms
+        );
+    } else {
+        println!("    {:<12} {}", "config", "off".dimmed());
+    }
+    // Progress note on stderr (terminal only) so piped output stays clean;
+    // erased once the probe is done.
+    use std::io::IsTerminal as _;
+    let show_progress = std::io::stderr().is_terminal();
+    if show_progress {
+        eprint!("    {:<12} testing (plays a short tone)…", "self-test");
+    }
+    let probe = ducking::probe();
+    if show_progress {
+        eprint!("\r\x1b[2K");
+    }
+    match &probe {
+        ducking::ProbeResult::Ok => println!(
+            "    {:<12} {}",
+            "self-test",
+            "✓ other apps were ducked and restored".green()
+        ),
+        ducking::ProbeResult::NothingPlaying => println!(
+            "    {:<12} {}",
+            "self-test",
+            "⚠ backend works, but nothing else is playing so a full duck could not be verified"
+                .yellow()
+        ),
+        ducking::ProbeResult::Unsupported(why) => {
+            println!("    {:<12} {}", "self-test", "⚠ unsupported".yellow());
+            println!("    {:<12} {}", "", why.dimmed());
+        }
+        ducking::ProbeResult::Failed(why) => {
+            println!("    {:<12} {}", "self-test", "✗ failed".red());
+            println!("    {:<12} {}", "", why.dimmed());
+            if cfg!(target_os = "macos") {
+                println!();
+                println!("    {}", "To fix on macOS:".bold());
+                println!(
+                    "      1. Open System Settings → Privacy & Security → Screen & System Audio Recording"
+                );
+                println!(
+                    "      2. Add the app that launches local-voice (Terminal, iTerm, Claude, VS Code…)"
+                );
+                println!("      3. Restart that app, then run `local-voice doctor` again");
+            }
+        }
+    }
+    println!();
+
     Ok(())
 }
 
@@ -854,7 +1008,17 @@ async fn interactive_mode() -> Result<()> {
                     .with_prompt("Text to speak")
                     .interact_text()?;
                 if !text.trim().is_empty() {
-                    handle_speak(&text, None, None, None, None, false).ok();
+                    handle_speak(
+                        &text,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        false,
+                        SpeakDucking::default(),
+                    )
+                    .ok();
                 }
             }
             1 => {
@@ -930,14 +1094,7 @@ async fn interactive_mode() -> Result<()> {
                                     .speed = Some(speed);
                             }
                             engine::EngineKind::Supertonic => {
-                                config
-                                    .supertonic
-                                    .get_or_insert(config::SupertonicConfig {
-                                        speed: None,
-                                        steps: None,
-                                        default_voice: None,
-                                    })
-                                    .speed = Some(speed);
+                                config.supertonic.get_or_insert_default().speed = Some(speed);
                             }
                             _ => {}
                         }
