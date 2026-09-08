@@ -246,7 +246,7 @@ impl Config {
         self.supertonic
             .as_ref()
             .and_then(|s| s.language.as_deref())
-            .unwrap_or("en")
+            .unwrap_or("auto")
     }
 
     /// Supertonic default voice
@@ -328,9 +328,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supertonic_language_defaults_to_en_and_parses() {
+    fn supertonic_language_defaults_to_auto_and_parses() {
         let config: Config = toml::from_str("[supertonic]\nspeed = 1.1\n").unwrap();
-        assert_eq!(config.supertonic_language(), "en");
+        assert_eq!(config.supertonic_language(), "auto");
         let config: Config = toml::from_str("[supertonic]\nlanguage = \"sl\"\n").unwrap();
         assert_eq!(config.supertonic_language(), "sl");
     }

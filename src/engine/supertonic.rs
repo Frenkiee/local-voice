@@ -105,7 +105,10 @@ pub struct SupertonicEngine {
     model_id: String,
     model_dir: std::path::PathBuf,
     generation: Generation,
+    /// Configured language, or `"auto"` to detect it from the text.
     language: String,
+    /// Language used for the current synthesis (resolved from `language`).
+    active_language: String,
     sample_rate: i32,
     base_chunk_size: i32,
     latent_dim: i32,
@@ -136,10 +139,16 @@ impl SupertonicEngine {
             Generation::V1 => LANGS_V1,
             Generation::Multilingual => supported_languages(model_id).unwrap_or(LANGS_V3),
         };
-        let language = language.trim().to_lowercase();
+        let mut language = language.trim().to_lowercase();
+        // "auto" detects the language from the text at synthesis time. v1 is
+        // English-only, so "auto" simply means "en" there.
+        if language == "auto" && generation == Generation::V1 {
+            language = "en".to_string();
+        }
         // "na" is the upstream escape hatch for "no specific language".
         let lang_ok = supported.contains(&language.as_str())
-            || (generation == Generation::Multilingual && language == "na");
+            || (generation == Generation::Multilingual
+                && matches!(language.as_str(), "na" | "auto"));
         if !lang_ok {
             let hint = if generation == Generation::V1 {
                 " Install a multilingual model: local-voice models install supertonic-3".to_string()
@@ -208,6 +217,11 @@ impl SupertonicEngine {
             model_id: model_id.to_string(),
             model_dir: model_dir.to_path_buf(),
             generation,
+            active_language: if language == "auto" {
+                DEFAULT_LANGUAGE.to_string()
+            } else {
+                language.clone()
+            },
             language,
             sample_rate: cfg.ae.sample_rate,
             base_chunk_size: cfg.ae.base_chunk_size,
@@ -222,6 +236,13 @@ impl SupertonicEngine {
     #[allow(dead_code)]
     pub fn language(&self) -> &str {
         &self.language
+    }
+
+    /// Language used by the most recent synthesis (the detected one when the
+    /// configured language is `"auto"`).
+    #[allow(dead_code)]
+    pub fn active_language(&self) -> &str {
+        &self.active_language
     }
 
     fn tokenize(&self, text: &str) -> Vec<i64> {
@@ -242,7 +263,7 @@ impl SupertonicEngine {
     fn infer_chunk(&mut self, chunk: &str) -> Result<Vec<f32>> {
         let processed = match self.generation {
             Generation::V1 => preprocess_text(chunk, true, None),
-            Generation::Multilingual => preprocess_text(chunk, false, Some(&self.language)),
+            Generation::Multilingual => preprocess_text(chunk, false, Some(&self.active_language)),
         };
         let text_ids_raw = self.tokenize(&processed);
         let text_len = text_ids_raw.len();
@@ -345,8 +366,20 @@ impl SupertonicEngine {
     }
 
     fn infer(&mut self, text: &str) -> Result<Vec<f32>> {
+        if self.language == "auto" {
+            let supported = supported_languages(&self.model_id).unwrap_or(LANGS_V3);
+            self.active_language = detect_language(text, supported)
+                .unwrap_or(DEFAULT_LANGUAGE)
+                .to_string();
+            if std::env::var_os("LOCAL_VOICE_DEBUG").is_some() {
+                eprintln!(
+                    "[local-voice] supertonic: auto language -> {}",
+                    self.active_language
+                );
+            }
+        }
         let max_chars = if self.generation == Generation::Multilingual
-            && matches!(self.language.as_str(), "ko" | "ja")
+            && matches!(self.active_language.as_str(), "ko" | "ja")
         {
             MAX_CHUNK_CHARS_CJK
         } else {
@@ -429,6 +462,173 @@ impl TtsEngine for SupertonicEngine {
 }
 
 // ── Text preprocessing (port of upstream py/helper.py `_preprocess_text`) ──
+
+/// Language used when the configured language is `"auto"` and detection is
+/// not confident (short or ambiguous text).
+pub const DEFAULT_LANGUAGE: &str = "en";
+
+/// ISO 639-3 (whatlang) → ISO 639-1 (Supertonic tag) for every language a
+/// Supertonic model can speak.
+const LANG_CODES: &[(&str, &str)] = &[
+    ("eng", "en"),
+    ("kor", "ko"),
+    ("jpn", "ja"),
+    ("ara", "ar"),
+    ("bul", "bg"),
+    ("ces", "cs"),
+    ("dan", "da"),
+    ("deu", "de"),
+    ("ell", "el"),
+    ("spa", "es"),
+    ("est", "et"),
+    ("fin", "fi"),
+    ("fra", "fr"),
+    ("hin", "hi"),
+    ("hrv", "hr"),
+    ("hun", "hu"),
+    ("ind", "id"),
+    ("ita", "it"),
+    ("lit", "lt"),
+    ("lav", "lv"),
+    ("nld", "nl"),
+    ("pol", "pl"),
+    ("por", "pt"),
+    ("ron", "ro"),
+    ("rus", "ru"),
+    ("slk", "sk"),
+    ("slv", "sl"),
+    ("swe", "sv"),
+    ("tur", "tr"),
+    ("ukr", "uk"),
+    ("vie", "vi"),
+];
+
+/// Minimum number of letters before we trust statistical detection at all.
+const MIN_DETECT_CHARS: usize = 12;
+
+/// Very common English function words that do not collide with common words
+/// of the other supported Latin-script languages (so no "in", "so", "to",
+/// "a", "was", "an", "also", "do", "on", "or", "as", which mean something in
+/// Slovenian, German, Dutch, French …).
+const ENGLISH_MARKERS: &[&str] = &[
+    "the",
+    "and",
+    "are",
+    "you",
+    "your",
+    "this",
+    "that",
+    "these",
+    "with",
+    "for",
+    "have",
+    "has",
+    "had",
+    "it",
+    "its",
+    "they",
+    "their",
+    "not",
+    "done",
+    "all",
+    "now",
+    "will",
+    "can",
+    "should",
+    "would",
+    "could",
+    "of",
+    "from",
+    "were",
+    "been",
+    "what",
+    "how",
+    "when",
+    "where",
+    "which",
+    "here",
+    "there",
+    "please",
+    "ready",
+    "finished",
+    "completed",
+    "complete",
+    "task",
+    "tests",
+    "running",
+    "started",
+    "starting",
+    "hello",
+    "okay",
+    "yes",
+    "but",
+    "just",
+    "into",
+    "about",
+    "is",
+    "be",
+    "my",
+    "me",
+    "if",
+    "then",
+    "than",
+    "at",
+    "by",
+    "up",
+    "out",
+    "new",
+    "some",
+];
+
+/// Whatlang confidence below which a Latin-script guess is treated as noise.
+const MIN_CONFIDENCE: f64 = 0.08;
+
+/// Detect the language of `text` among `supported` (ISO 639-1 codes),
+/// entirely offline. Returns `None` when the text is too short or the
+/// detector is not confident, so the caller can fall back to a default.
+///
+/// Trigram detection (whatlang) is unreliable on the short sentences an
+/// agent typically speaks, so English, the most common case, is recognised
+/// first from its function words; everything else goes through whatlang
+/// restricted to the model's languages.
+pub fn detect_language(text: &str, supported: &[&str]) -> Option<&'static str> {
+    let letters = text.chars().filter(|c| c.is_alphabetic()).count();
+    if letters < MIN_DETECT_CHARS {
+        return None;
+    }
+    let words: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect();
+    let hits = words
+        .iter()
+        .filter(|w| ENGLISH_MARKERS.contains(&w.as_str()))
+        .count();
+    if supported.contains(&"en") && hits >= 2 && hits * 4 >= words.len() {
+        return Some("en");
+    }
+    let allow: Vec<whatlang::Lang> = whatlang::Lang::all()
+        .iter()
+        .copied()
+        .filter(|l| {
+            LANG_CODES
+                .iter()
+                .any(|(iso3, iso1)| *iso3 == l.code() && supported.contains(iso1))
+        })
+        .collect();
+    if allow.is_empty() {
+        return None;
+    }
+    let info = whatlang::Detector::with_allowlist(allow).detect(text)?;
+    if !info.is_reliable() && info.confidence() < MIN_CONFIDENCE {
+        return None;
+    }
+    LANG_CODES
+        .iter()
+        .find(|(iso3, _)| *iso3 == info.lang().code())
+        .map(|(_, iso1)| *iso1)
+}
 
 /// Normalize text the way the upstream reference does.
 ///
@@ -766,6 +966,53 @@ fn flatten_style_component(sc: &StyleComponent) -> Result<(Vec<f32>, [usize; 3])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_supported_languages() {
+        assert_eq!(
+            detect_language(
+                "Dober dan, kako si danes? Upam, da je vse v redu.",
+                LANGS_V3
+            ),
+            Some("sl")
+        );
+        assert_eq!(
+            detect_language("Hello, how are you doing today my friend?", LANGS_V3),
+            Some("en")
+        );
+        assert_eq!(
+            detect_language("Guten Morgen, wie geht es dir heute?", LANGS_V3),
+            Some("de")
+        );
+        assert_eq!(
+            detect_language(
+                "Naloga je končana. Vse teste so uspešno opravili.",
+                LANGS_V3
+            ),
+            Some("sl")
+        );
+        assert_eq!(
+            detect_language("The build finished and all tests passed.", LANGS_V3),
+            Some("en")
+        );
+        assert_eq!(
+            detect_language("Привет, как дела сегодня?", LANGS_V3),
+            Some("ru")
+        );
+    }
+
+    #[test]
+    fn short_or_unsupported_text_falls_back() {
+        assert_eq!(detect_language("Done.", LANGS_V3), None);
+        // English-only model: never returns anything else.
+        assert!(matches!(
+            detect_language(
+                "Dober dan, kako si danes? Upam, da je vse v redu.",
+                LANGS_V1
+            ),
+            None | Some("en")
+        ));
+    }
 
     fn cfg(version: Option<&str>, split: Option<&str>) -> TtsConfig {
         TtsConfig {

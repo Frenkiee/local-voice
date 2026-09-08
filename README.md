@@ -297,11 +297,13 @@ Flow-matching TTS by [Supertone](https://huggingface.co/Supertone) with a 4-mode
 
 ```bash
 local-voice models install supertonic-3    # 399 MB, then: local-voice models default supertonic-3
-local-voice speak "Dober dan, kako si?" --language sl
-local-voice config set language sl         # make Slovenian the default (also: supertonic.language)
+local-voice speak "Dober dan, kako si?"                 # language auto-detected (default)
+local-voice speak "Dober dan, kako si?" --language sl   # force a language
+local-voice config set language sl         # fixed default language (also: supertonic.language)
+local-voice config set language auto       # back to auto-detection
 ```
 
-10 voices per model: `F1`–`F5` (female), `M1`–`M5` (male). Voice styles are model-specific, so `voices install M2` fetches the file for the model that is currently the default. Supertonic 3 also understands expression tags like `<laugh>`, `<breath>`, `<sigh>` inside the text. Language is passed as a tag around the text (`<sl>…</sl>`), so switching language needs no extra download.
+10 voices per model: `F1`–`F5` (female), `M1`–`M5` (male). Voice styles are model-specific, so `voices install M2` fetches the file for the model that is currently the default. Supertonic 3 also understands expression tags like `<laugh>`, `<breath>`, `<sigh>` inside the text. Language is passed as a tag around the text (`<sl>…</sl>`), so switching language needs no extra download. With the default `language = auto` the language is detected offline from the text (whatlang, restricted to the model's languages); very short or ambiguous text falls back to English.
 
 ### Kokoro
 

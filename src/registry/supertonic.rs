@@ -74,11 +74,11 @@ pub fn supported_languages(model_id: &str) -> Option<&'static [&'static str]> {
 /// (Whether the *installed* model supports it is checked at engine load.)
 pub fn validate_language(lang: &str) -> anyhow::Result<()> {
     let l = lang.trim().to_lowercase();
-    if l == "na" || LANGS_V3.contains(&l.as_str()) {
+    if l == "na" || l == "auto" || LANGS_V3.contains(&l.as_str()) {
         Ok(())
     } else {
         anyhow::bail!(
-            "Unknown language '{lang}'. Supertonic 3 supports: {}",
+            "Unknown language '{lang}'. Use 'auto' or one of: {}",
             LANGS_V3.join(", ")
         )
     }
