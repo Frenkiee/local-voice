@@ -52,15 +52,11 @@ impl HardwareProfile {
                     "kokoro-q4f16"
                 }
             }
-            EngineKind::Chatterbox => {
-                if self.total_ram_mb >= 16384 {
-                    "chatterbox-full"
-                } else {
-                    "chatterbox-quantized"
-                }
-            }
+            // Turbo: 350M params, 1-step decoder, ~6x faster than the original
+            // export and ~700 MB on disk. Verified on CPU (Apple Silicon).
+            EngineKind::Chatterbox => "chatterbox-turbo",
             EngineKind::Piper => "en_US-lessac-medium",
-            EngineKind::Supertonic => "supertonic",
+            EngineKind::Supertonic => "supertonic-3",
         }
     }
 

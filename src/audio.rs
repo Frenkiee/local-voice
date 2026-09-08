@@ -1,18 +1,32 @@
 use anyhow::{Context, Result};
 use std::num::NonZero;
 use std::path::Path;
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::thread;
+use std::time::Duration;
 
+use crate::config::Config;
+use crate::ducking::{self, DuckingSettings};
 use crate::engine::AudioOutput;
 
-/// Play audio through the default output device (blocking)
-pub fn play_audio(audio: &AudioOutput) -> Result<()> {
+/// How long the background queue keeps other apps ducked after an item
+/// finishes, waiting for the next one. Back-to-back `speak_async` calls stay
+/// under one duck instead of pumping the volume up and down between items.
+const DUCK_HOLD: Duration = Duration::from_millis(400);
+
+/// Play audio through the default output device (blocking).
+///
+/// Other applications are ducked according to `ducking` for the duration of
+/// playback. `ducking::duck` blocks for the fade, so speech starts once the
+/// other apps are already quiet; they are restored before this returns.
+pub fn play_audio(audio: &AudioOutput, ducking: &DuckingSettings) -> Result<()> {
     let source = rodio::buffer::SamplesBuffer::new(
         NonZero::new(audio.channels).unwrap(),
         NonZero::new(audio.sample_rate).unwrap(),
         audio.samples.clone(),
     );
+
+    let duck_guard = ducking::duck(ducking);
 
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
         .with_context(|| "Failed to open audio output device")?;
@@ -25,6 +39,9 @@ pub fn play_audio(audio: &AudioOutput) -> Result<()> {
     // Keep sink alive until playback finishes — dropping it kills audio on Windows
     drop(player);
     drop(sink);
+
+    // Restore other apps' volume (fades back) before returning.
+    drop(duck_guard);
 
     Ok(())
 }
@@ -65,10 +82,32 @@ impl AudioQueue {
                     return;
                 }
             };
-            while let Ok(audio) = audio_rx.recv() {
-                if let Err(e) = play_audio_on_sink(&audio, &sink) {
-                    eprintln!("[local-voice] Playback error: {e}");
+            // Block for the first item of a burst, then hold the duck while
+            // more items keep arriving within DUCK_HOLD of each other.
+            while let Ok(first) = audio_rx.recv() {
+                // Config may change at runtime (MCP set_config): re-read per burst.
+                let settings = Config::load()
+                    .map(|c| c.ducking_settings())
+                    .unwrap_or_default();
+                let duck_guard = ducking::duck(&settings);
+
+                let mut audio = first;
+                loop {
+                    if let Err(e) = play_audio_on_sink(&audio, &sink) {
+                        eprintln!("[local-voice] Playback error: {e}");
+                    }
+                    match audio_rx.recv_timeout(DUCK_HOLD) {
+                        Ok(next) => audio = next,
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => {
+                            drop(duck_guard);
+                            drop(sink);
+                            return;
+                        }
+                    }
                 }
+                // Burst over: fade other apps back up, then wait for the next one.
+                drop(duck_guard);
             }
             drop(sink);
         });

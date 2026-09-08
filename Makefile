@@ -162,9 +162,9 @@ ifeq ($(DETECTED_OS),windows)
 endif
 	@echo ""
 	@$(MAKE) --no-print-directory mcp-install
-	@echo "── Installing default model (Supertonic) ──"
+	@echo "── Installing default model (Supertonic 3) ──"
 	@echo ""
-	@"$(INSTALL_DIR)/$(BINARY)" models install supertonic || true
+	@"$(INSTALL_DIR)/$(BINARY)" models install supertonic-3 || true
 	@"$(INSTALL_DIR)/$(BINARY)" voices default F2 2>/dev/null || true
 	@"$(INSTALL_DIR)/$(BINARY)" config set speed 1.1 2>/dev/null || true
 	@echo ""

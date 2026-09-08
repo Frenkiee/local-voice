@@ -1,6 +1,6 @@
 [package]
 name = "local-voice"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Local TTS CLI with MCP server — run text-to-speech models locally and expose them to AI agents"
 license = "MIT"
@@ -32,3 +32,27 @@ ndarray = "0.16"
 rand = "0.8"
 rand_distr = "0.4"
 unicode-normalization = "0.1"
+
+# ── Ducking backends (per-process volume control while speaking) ──────────────
+# Each section is owned by its platform backend in src/ducking/<os>.rs.
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+# `dispatch2` + `objc2-core-audio-types` gate `AudioDeviceCreateIOProcIDWithBlock`
+# and the AudioBufferList / AudioStreamBasicDescription types used by the IOProc.
+objc2-core-audio = { version = "0.3", features = ["AudioHardware", "objc2", "objc2-foundation", "block2", "dispatch2", "objc2-core-audio-types"] }
+objc2-core-audio-types = "0.3"
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+block2 = "0.6"
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }

@@ -32,7 +32,7 @@ impl EngineKind {
             Self::Kokoro => "82M params, near-human quality, CPU-friendly",
             Self::Piper => "Tiny models, fastest inference, runs anywhere",
             Self::Chatterbox => "500M params, voice cloning, best with GPU",
-            Self::Supertonic => "66M params, 167x realtime, multilingual, CPU-native",
+            Self::Supertonic => "66-99M params, 167x realtime, 31 languages (v3), CPU-native",
         }
     }
 

@@ -1212,9 +1212,10 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "local-voice"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
+ "block2",
  "clap",
  "dialoguer",
  "dirs",
@@ -1222,7 +1223,13 @@ dependencies = [
  "futures-util",
  "hound",
  "indicatif",
+ "libc",
  "ndarray 0.16.1",
+ "objc2",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation",
  "ort",
  "owo-colors",
  "rand 0.8.5",
@@ -1235,6 +1242,7 @@ dependencies = [
  "tokio",
  "toml",
  "unicode-normalization",
+ "windows",
 ]
 
 [[package]]
@@ -1558,7 +1566,9 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
 dependencies = [
+ "block2",
  "dispatch2",
+ "libc",
  "objc2",
  "objc2-core-audio-types",
  "objc2-core-foundation",
