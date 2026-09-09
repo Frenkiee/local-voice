@@ -257,7 +257,7 @@ impl Config {
             .unwrap_or("F1")
     }
 
-    /// Resolved ducking settings (config values over defaults: on, 20 %, 300 ms)
+    /// Resolved ducking settings (config values over defaults: on, 10 %, 300 ms)
     pub fn ducking_settings(&self) -> DuckingSettings {
         let d = self.ducking.as_ref();
         let defaults = DuckingSettings::default();
@@ -341,7 +341,7 @@ mod tests {
         assert!(config.ducking.is_none());
         let s = config.ducking_settings();
         assert!(s.enabled);
-        assert_eq!(s.level, 0.2);
+        assert_eq!(s.level, 0.1);
         assert_eq!(s.fade_ms, 300);
         assert_eq!(s, DuckingSettings::default());
     }
@@ -351,7 +351,7 @@ mod tests {
         let config: Config = toml::from_str("[ducking]\nenabled = false\n").unwrap();
         let s = config.ducking_settings();
         assert!(!s.enabled);
-        assert_eq!(s.level, 0.2);
+        assert_eq!(s.level, 0.1);
         assert_eq!(s.fade_ms, 300);
 
         let config: Config = toml::from_str("[ducking]\nlevel = 0.5\nfade_ms = 100\n").unwrap();
