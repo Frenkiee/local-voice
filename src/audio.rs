@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::config::Config;
 use crate::ducking::{self, DuckingSettings};
 use crate::engine::AudioOutput;
+use crate::playback_lock;
 
 /// How long the background queue keeps other apps ducked after an item
 /// finishes, waiting for the next one. Back-to-back `speak_async` calls stay
@@ -26,6 +27,9 @@ pub fn play_audio(audio: &AudioOutput, ducking: &DuckingSettings) -> Result<()> 
         audio.samples.clone(),
     );
 
+    // Wait for every other local-voice process (other MCP servers, other
+    // CLI invocations) to finish talking, then duck and play.
+    let slot = playback_lock::acquire();
     let duck_guard = ducking::duck(ducking);
 
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
@@ -40,8 +44,9 @@ pub fn play_audio(audio: &AudioOutput, ducking: &DuckingSettings) -> Result<()> 
     drop(player);
     drop(sink);
 
-    // Restore other apps' volume (fades back) before returning.
+    // Restore other apps' volume (fades back), then let the next process in.
     drop(duck_guard);
+    drop(slot);
 
     Ok(())
 }
@@ -85,6 +90,12 @@ impl AudioQueue {
             // Block for the first item of a burst, then hold the duck while
             // more items keep arriving within DUCK_HOLD of each other.
             while let Ok(first) = audio_rx.recv() {
+                // Strict FIFO across processes: two agents whose servers
+                // both call speak_async at once no longer talk over each
+                // other. The slot is held for the whole burst, including the
+                // DUCK_HOLD window, so a second process cannot squeeze in
+                // while this one still has the other apps ducked.
+                let slot = playback_lock::acquire();
                 // Config may change at runtime (MCP set_config): re-read per burst.
                 let settings = Config::load()
                     .map(|c| c.ducking_settings())
@@ -101,13 +112,16 @@ impl AudioQueue {
                         Err(RecvTimeoutError::Timeout) => break,
                         Err(RecvTimeoutError::Disconnected) => {
                             drop(duck_guard);
+                            drop(slot);
                             drop(sink);
                             return;
                         }
                     }
                 }
-                // Burst over: fade other apps back up, then wait for the next one.
+                // Burst over: fade other apps back up, release the queue slot,
+                // then wait for the next burst.
                 drop(duck_guard);
+                drop(slot);
             }
             drop(sink);
         });
