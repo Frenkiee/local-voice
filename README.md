@@ -178,13 +178,13 @@ local-voice config auto-detect             # pick best engine for your hardware
 ### Ducking
 
 While local-voice speaks, every *other* app's audio (music, podcasts, browser tabs, …) is
-faded down to 20 % and faded back up once speech finishes, so notifications stay
+faded down to 10 % and faded back up once speech finishes, so notifications stay
 intelligible over whatever you're listening to. The system/master volume is never touched —
 only other apps' per-app output level. Ducking is **on by default**.
 
 ```bash
 local-voice config set ducking off         # disable globally (on|off|true|false|1|0)
-local-voice config set ducking.level 0.4   # duck other apps to 40 % instead of 20 % (0..1)
+local-voice config set ducking.level 0.4   # duck other apps to 40 % instead of 10 % (0..1)
 local-voice config set ducking.fade_ms 500 # fade in/out duration in ms (max 5000, default 300)
 local-voice speak "Hi" --no-ducking        # skip ducking for a single run
 local-voice speak "Hi" --ducking-level 0.5 # override the level for a single run

@@ -103,7 +103,7 @@ pub enum Commands {
         #[arg(long, default_value_t = false)]
         no_ducking: bool,
 
-        /// Volume other apps are ducked to while speaking, 0..1 (default: 0.2 = 20%)
+        /// Volume other apps are ducked to while speaking, 0..1 (default: 0.1 = 10%)
         #[arg(long, value_name = "0..1", conflicts_with = "no_ducking")]
         ducking_level: Option<f32>,
     },
@@ -222,7 +222,7 @@ pub enum ConfigAction {
   ducking     Lower other apps' audio while speaking (on, off)
 
 \x1b[1mDucking keys:\x1b[0m
-  ducking.level           Volume other apps are ducked to, 0..1 (default 0.2)
+  ducking.level           Volume other apps are ducked to, 0..1 (default 0.1)
   ducking.fade_ms         Fade in/out duration in ms, max 5000 (default 300)
 
 \x1b[1mEngine-specific keys:\x1b[0m

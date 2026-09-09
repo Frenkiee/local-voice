@@ -65,7 +65,7 @@ pub enum ProbeResult {
 /// Settings used by [`probe`]: a short fade so the whole test is quick.
 pub const PROBE_SETTINGS: DuckingSettings = DuckingSettings {
     enabled: true,
-    level: 0.2,
+    level: 0.1,
     fade_ms: 150,
 };
 
@@ -87,14 +87,14 @@ pub fn probe() -> ProbeResult {
 pub struct DuckingSettings {
     /// Master switch. Default: on.
     pub enabled: bool,
-    /// Target gain for other apps while we speak, 0.0..=1.0 (0.2 = 20 %).
+    /// Target gain for other apps while we speak, 0.0..=1.0 (0.1 = 10 %).
     pub level: f32,
     /// Fade duration for both the duck and the restore, in milliseconds.
     pub fade_ms: u64,
 }
 
 impl DuckingSettings {
-    pub const DEFAULT_LEVEL: f32 = 0.2;
+    pub const DEFAULT_LEVEL: f32 = 0.1;
     pub const DEFAULT_FADE_MS: u64 = 300;
 }
 

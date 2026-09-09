@@ -140,7 +140,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                             },
                             "ducking_level": {
                                 "type": "number",
-                                "description": "Volume other apps are ducked to while speaking, 0..1 (default 0.2 = 20%)"
+                                "description": "Volume other apps are ducked to while speaking, 0..1 (default 0.1 = 10%)"
                             }
                         },
                         "required": []
