@@ -7,7 +7,7 @@ description: Narrate your work aloud with the local-voice MCP tools (speak_async
 
 The `local-voice` MCP server exposes `speak_async` (fire and forget) and `speak`
 (blocks ~1–2 s for synthesis, then plays in the background). Other apps' audio is
-ducked to ~20 % while speech plays and fades back afterwards.
+ducked to ~10 % while speech plays and fades back afterwards.
 
 ## When to speak
 
