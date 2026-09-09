@@ -7,6 +7,7 @@ mod engine;
 mod hardware;
 mod mcp;
 mod phonemize;
+mod playback_lock;
 mod registry;
 
 use anyhow::{Result, bail};

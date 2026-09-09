@@ -178,6 +178,10 @@ local-voice config paths                   # show config + model file locations
 local-voice config auto-detect             # pick best engine for your hardware
 ```
 
+### Playback queue
+
+All local-voice processes on the machine share one first-come-first-served playback queue: several agents (each with its own MCP server) and the CLI never talk over each other. A process that crashes mid-speech is detected and skipped automatically. The queue lives in the user's temp directory (`local-voice-playback-queue`).
+
 ### Ducking
 
 While local-voice speaks, every *other* app's audio (music, podcasts, browser tabs, …) is
