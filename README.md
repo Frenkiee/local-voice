@@ -180,7 +180,9 @@ local-voice config auto-detect             # pick best engine for your hardware
 
 ### Playback queue
 
-All local-voice processes on the machine share one first-come-first-served playback queue: several agents (each with its own MCP server) and the CLI never talk over each other. A process that crashes mid-speech is detected and skipped automatically. The queue lives in the user's temp directory (`local-voice-playback-queue`).
+All local-voice processes on the machine share one first-come-first-served playback queue: several agents (each with its own MCP server) and the CLI never talk over each other. A process that crashes mid-speech is detected and skipped automatically. A process that is alive but stuck (for example its output device disappeared mid-sentence) is skipped too: every player stamps its ticket with the time it promises to be done, and waiters take over once that deadline has passed. The queue lives in the user's temp directory (`local-voice-playback-queue`).
+
+Playback itself is bounded as well. Each item may take at most its own length plus three seconds; if the output device stops consuming samples (headphones unplugged, output switched, sleep/wake), the player gives up, restores the other apps' volume, releases the queue, and the next item reopens the current default device.
 
 ### Ducking
 

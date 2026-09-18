@@ -16,6 +16,14 @@
 //! Tickets of processes that died (crash, kill) are detected by checking
 //! whether the pid is still alive and are removed by whoever is waiting, so a
 //! crash can never wedge the queue.
+//!
+//! A holder that is alive but stuck (its output device vanished and playback
+//! never finishes) is caught by a deadline: before playing an item the holder
+//! stamps its ticket with the time by which it promises to be done
+//! ([`PlaybackSlot::promise_done_within`]). Waiters treat a ticket whose
+//! promised deadline has passed as abandoned and remove it. A ticket without a
+//! stamp is a process still waiting in line, or one that has not started its
+//! first item yet; those are only ever judged by pid liveness.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,6 +37,21 @@ const POLL: Duration = Duration::from_millis(25);
 /// next player speak.
 pub struct PlaybackSlot {
     ticket: PathBuf,
+}
+
+impl PlaybackSlot {
+    /// Promise the other processes to be done within `budget`. Call it before
+    /// every item so the deadline always covers what is actually playing; a
+    /// waiter that finds the deadline in the past assumes this holder is
+    /// stuck and takes the queue over.
+    pub fn promise_done_within(&self, budget: Duration) {
+        let deadline = SystemTime::now()
+            .checked_add(budget)
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+        if let Some(deadline) = deadline {
+            let _ = fs::write(&self.ticket, deadline.as_nanos().to_string());
+        }
+    }
 }
 
 impl Drop for PlaybackSlot {
@@ -88,7 +111,8 @@ fn create_ticket(dir: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Name of the oldest live ticket, removing dead ones on the way.
+/// Name of the oldest live ticket, removing dead and abandoned ones on the
+/// way.
 fn head_of_queue(dir: &Path) -> Option<std::ffi::OsString> {
     let mut names: Vec<std::ffi::OsString> = fs::read_dir(dir)
         .ok()?
@@ -97,13 +121,29 @@ fn head_of_queue(dir: &Path) -> Option<std::ffi::OsString> {
         .collect();
     names.sort();
     for name in names {
+        let path = dir.join(&name);
         let alive = ticket_pid(&name).is_some_and(pid_alive);
-        if alive {
+        if alive && !ticket_expired(&path) {
             return Some(name);
         }
-        let _ = fs::remove_file(dir.join(&name));
+        let _ = fs::remove_file(path);
     }
     None
+}
+
+/// True when the ticket carries a promised deadline that has passed.
+fn ticket_expired(path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(deadline) = contents.trim().parse::<u128>() else {
+        return false;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    now > deadline
 }
 
 fn ticket_pid(name: &std::ffi::OsStr) -> Option<u32> {
@@ -183,6 +223,33 @@ mod tests {
         fs::write(&stale, b"").unwrap();
         let slot = acquire().expect("queue usable");
         assert!(!stale.exists(), "stale ticket must be removed");
+        drop(slot);
+    }
+
+    #[test]
+    fn expired_ticket_of_live_process_is_skipped() {
+        let dir = queue_dir();
+        fs::create_dir_all(&dir).unwrap();
+        // Our own pid is certainly alive, but the promised deadline is long
+        // gone: a stuck holder.
+        let stuck = dir.join(format!("00000000000000000001-{}", std::process::id()));
+        fs::write(&stuck, b"1").unwrap();
+        let slot = acquire().expect("queue usable");
+        assert!(!stuck.exists(), "abandoned ticket must be removed");
+        drop(slot);
+    }
+
+    #[test]
+    fn promised_deadline_in_future_is_honoured() {
+        let dir = queue_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let slot = acquire().expect("queue usable");
+        slot.promise_done_within(Duration::from_secs(60));
+        assert!(!ticket_expired(&slot.ticket));
+        slot.promise_done_within(Duration::ZERO);
+        thread::sleep(Duration::from_millis(2));
+        assert!(ticket_expired(&slot.ticket));
+        assert!(!ticket_expired(Path::new("/nonexistent/ticket")));
         drop(slot);
     }
 
