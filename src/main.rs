@@ -40,6 +40,8 @@ async fn main() -> Result<()> {
             no_play,
             no_ducking,
             ducking_level,
+            volume,
+            no_normalize,
         }) => handle_speak(
             &text,
             voice.as_deref(),
@@ -51,6 +53,10 @@ async fn main() -> Result<()> {
             SpeakDucking {
                 disable: no_ducking,
                 level: ducking_level,
+            },
+            SpeakLoudness {
+                volume,
+                disable_normalize: no_normalize,
             },
         )?,
         Some(Commands::Serve) => mcp::run_server()?,
@@ -450,6 +456,15 @@ struct SpeakDucking {
     level: Option<f32>,
 }
 
+/// One-run output-loudness overrides from the `speak` command line.
+#[derive(Debug, Clone, Copy, Default)]
+struct SpeakLoudness {
+    /// `--volume <0..2>`
+    volume: Option<f32>,
+    /// `--no-normalize`
+    disable_normalize: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_speak(
     text: &str,
@@ -460,6 +475,7 @@ fn handle_speak(
     output: Option<&std::path::Path>,
     no_play: bool,
     ducking_override: SpeakDucking,
+    loudness_override: SpeakLoudness,
 ) -> Result<()> {
     if let Some(s) = speed {
         validate_speed(s)?;
@@ -478,7 +494,22 @@ fn handle_speak(
         ducking_settings.level = level;
     }
 
-    let loudness_settings = config.output_settings();
+    // Output loudness: config, then per-run CLI overrides. Volume still
+    // applies with normalization off — the two are independent.
+    let mut loudness_settings = config.output_settings();
+    if loudness_override.disable_normalize {
+        loudness_settings.normalize = false;
+    }
+    if let Some(volume) = loudness_override.volume {
+        if !(config::MIN_VOLUME..=config::MAX_VOLUME).contains(&volume) {
+            bail!(
+                "Invalid --volume {volume}: must be between {} and {}",
+                config::MIN_VOLUME,
+                config::MAX_VOLUME
+            );
+        }
+        loudness_settings.volume = volume;
+    }
 
     let engine_kind = match engine_name {
         Some(e) => e.parse::<engine::EngineKind>()?,
@@ -1022,6 +1053,7 @@ async fn interactive_mode() -> Result<()> {
                         None,
                         false,
                         SpeakDucking::default(),
+                        SpeakLoudness::default(),
                     )
                     .ok();
                 }

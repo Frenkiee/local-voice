@@ -70,7 +70,9 @@ pub enum Commands {
   local-voice speak \"Dober dan\" -l sl              Slovenian (Supertonic 3)
   local-voice speak \"Hi\" -o output.wav             Save to file
   local-voice speak \"Hi\" -o out.wav --no-play      Save only, don't play
-  local-voice speak \"Hi\" --no-ducking              Don't lower other apps' volume")]
+  local-voice speak \"Hi\" --no-ducking              Don't lower other apps' volume
+  local-voice speak \"Hi\" --volume 1.5              Louder output for this run
+  local-voice speak \"Hi\" --no-normalize            Play the raw model level")]
     Speak {
         /// Text to speak
         text: String,
@@ -106,6 +108,14 @@ pub enum Commands {
         /// Volume other apps are ducked to while speaking, 0..1 (default: 0.1 = 10%)
         #[arg(long, value_name = "0..1", conflicts_with = "no_ducking")]
         ducking_level: Option<f32>,
+
+        /// Output volume for this run, 0..2 (default: 1.0 = unchanged)
+        #[arg(long, value_name = "0..2")]
+        volume: Option<f32>,
+
+        /// Play this run at the model's raw level instead of the normalized one
+        #[arg(long, default_value_t = false)]
+        no_normalize: bool,
     },
 
     /// Start MCP server (JSON-RPC over stdio)
@@ -122,6 +132,7 @@ pub enum Commands {
   local-voice config set voice af_alloy  Set default voice
   local-voice config set model supertonic-3  Set default model
   local-voice config set ducking off     Stop lowering other apps' audio
+  local-voice config set output.volume 1.5   Make speech louder
   local-voice config paths               Show file paths
   local-voice config auto-detect         Auto-detect best engine")]
     Config {
@@ -225,6 +236,12 @@ pub enum ConfigAction {
   ducking.level           Volume other apps are ducked to, 0..1 (default 0.1)
   ducking.fade_ms         Fade in/out duration in ms, max 5000 (default 300)
 
+\x1b[1mOutput loudness keys:\x1b[0m
+  output.volume           Output volume, 0..2 (default 1.0)
+  output.normalize        Even out each utterance's loudness (on, off)
+  output.target_rms_db    Loudness utterances are brought to, -40..-6 (default -20)
+  output.peak_ceiling_db  Headroom normalization keeps, -12..0 (default -1)
+
 \x1b[1mEngine-specific keys:\x1b[0m
   kokoro.speed            Kokoro speech speed
   kokoro.default_voice    Kokoro default voice
@@ -243,4 +260,44 @@ pub enum ConfigAction {
 
     /// Auto-detect hardware and set recommended engine
     AutoDetect,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn command_tree_is_well_formed() {
+        // Catches duplicate short flags and bad conflicts at test time
+        // instead of at the operator's first invocation.
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn speak_takes_loudness_overrides() {
+        let cli = Cli::try_parse_from(["local-voice", "speak", "Hi", "--volume", "1.5"]).unwrap();
+        let Some(Commands::Speak {
+            volume,
+            no_normalize,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected the speak command");
+        };
+        assert_eq!(volume, Some(1.5));
+        assert!(!no_normalize);
+
+        let cli = Cli::try_parse_from(["local-voice", "speak", "Hi", "--no-normalize"]).unwrap();
+        let Some(Commands::Speak {
+            volume,
+            no_normalize,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected the speak command");
+        };
+        assert_eq!(volume, None);
+        assert!(no_normalize, "--no-normalize must stand alone");
+    }
 }
