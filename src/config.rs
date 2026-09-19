@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::ducking::DuckingSettings;
 use crate::engine::EngineKind;
+use crate::loudness::LoudnessSettings;
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct Config {
@@ -15,6 +16,7 @@ pub struct Config {
     pub chatterbox: Option<ChatterboxConfig>,
     pub supertonic: Option<SupertonicConfig>,
     pub ducking: Option<DuckingConfig>,
+    pub output: Option<OutputConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,6 +49,34 @@ pub struct DuckingConfig {
     pub enabled: Option<bool>,
     pub level: Option<f32>,
     pub fade_ms: Option<u64>,
+}
+
+// ── Accepted ranges for the `[output]` table ────────────────────────────────
+// Shared by `config set output.*`, the `speak --volume` flag and the MCP
+// `set_config` tool, so every entry point rejects the same values.
+
+/// Silent.
+pub const MIN_VOLUME: f32 = 0.0;
+/// +6 dB. Past this, normalized speech clips more than it gains.
+pub const MAX_VOLUME: f32 = 2.0;
+/// Quieter than this and normalization stops being worth running.
+pub const MIN_TARGET_RMS_DB: f32 = -40.0;
+/// Louder than this and ordinary speech sits against the ceiling.
+pub const MAX_TARGET_RMS_DB: f32 = -6.0;
+/// Headroom no larger than 12 dB.
+pub const MIN_PEAK_CEILING_DB: f32 = -12.0;
+/// Full scale — no headroom at all.
+pub const MAX_PEAK_CEILING_DB: f32 = 0.0;
+
+/// Output loudness (normalization + the operator's volume). All fields are
+/// optional so older config files keep loading; see [`Config::output_settings`]
+/// for the resolved defaults and the accepted ranges.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct OutputConfig {
+    pub normalize: Option<bool>,
+    pub target_rms_db: Option<f32>,
+    pub peak_ceiling_db: Option<f32>,
+    pub volume: Option<f32>,
 }
 
 impl Config {
@@ -271,6 +301,32 @@ impl Config {
         }
     }
 
+    /// Resolved output loudness (config values over defaults: normalize on,
+    /// −20 dBFS RMS target, −1 dBFS peak ceiling, volume 1.0).
+    ///
+    /// Values are clamped to the ranges `config set` enforces, so a
+    /// hand-edited config file cannot ask for a gain stage that deafens the
+    /// operator or mutes them by accident.
+    pub fn output_settings(&self) -> LoudnessSettings {
+        let o = self.output.as_ref();
+        let defaults = LoudnessSettings::default();
+        LoudnessSettings {
+            normalize: o.and_then(|o| o.normalize).unwrap_or(defaults.normalize),
+            target_rms_db: o
+                .and_then(|o| o.target_rms_db)
+                .unwrap_or(defaults.target_rms_db)
+                .clamp(MIN_TARGET_RMS_DB, MAX_TARGET_RMS_DB),
+            peak_ceiling_db: o
+                .and_then(|o| o.peak_ceiling_db)
+                .unwrap_or(defaults.peak_ceiling_db)
+                .clamp(MIN_PEAK_CEILING_DB, MAX_PEAK_CEILING_DB),
+            volume: o
+                .and_then(|o| o.volume)
+                .unwrap_or(defaults.volume)
+                .clamp(MIN_VOLUME, MAX_VOLUME),
+        }
+    }
+
     /// List installed voice files for an engine+model combo
     pub fn installed_voices(engine: EngineKind, model_id: &str) -> Vec<String> {
         let voices_dir = Self::resolve_model_path(engine, model_id).join("voices");
@@ -359,6 +415,68 @@ mod tests {
         assert!(s.enabled);
         assert_eq!(s.level, 0.5);
         assert_eq!(s.fade_ms, 100);
+    }
+
+    #[test]
+    fn output_defaults_when_section_missing() {
+        let config: Config = toml::from_str("default_engine = \"kokoro\"\n").unwrap();
+        assert!(config.output.is_none());
+        assert_eq!(config.output_settings(), LoudnessSettings::default());
+        let s = config.output_settings();
+        assert!(s.normalize);
+        assert_eq!(s.target_rms_db, -20.0);
+        assert_eq!(s.peak_ceiling_db, -1.0);
+        assert_eq!(s.volume, 1.0);
+    }
+
+    #[test]
+    fn output_section_parses_and_overrides() {
+        let config: Config = toml::from_str("[output]\nnormalize = false\n").unwrap();
+        let s = config.output_settings();
+        assert!(!s.normalize);
+        assert_eq!(s.volume, 1.0, "the other keys keep their defaults");
+
+        let config: Config = toml::from_str(
+            "[output]\nvolume = 1.5\ntarget_rms_db = -18.0\npeak_ceiling_db = -3.0\n",
+        )
+        .unwrap();
+        let s = config.output_settings();
+        assert!(s.normalize);
+        assert_eq!(s.volume, 1.5);
+        assert_eq!(s.target_rms_db, -18.0);
+        assert_eq!(s.peak_ceiling_db, -3.0);
+    }
+
+    #[test]
+    fn hand_edited_output_values_are_clamped_to_the_accepted_ranges() {
+        let config: Config = toml::from_str(
+            "[output]\nvolume = 9.0\ntarget_rms_db = 6.0\npeak_ceiling_db = -40.0\n",
+        )
+        .unwrap();
+        let s = config.output_settings();
+        assert_eq!(s.volume, MAX_VOLUME);
+        assert_eq!(s.target_rms_db, MAX_TARGET_RMS_DB);
+        assert_eq!(s.peak_ceiling_db, MIN_PEAK_CEILING_DB);
+
+        let config: Config = toml::from_str("[output]\nvolume = -1.0\n").unwrap();
+        assert_eq!(config.output_settings().volume, MIN_VOLUME);
+    }
+
+    #[test]
+    fn output_round_trips_through_save_format() {
+        let config = Config {
+            output: Some(OutputConfig {
+                normalize: Some(false),
+                volume: Some(1.25),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        let s = back.output_settings();
+        assert!(!s.normalize);
+        assert_eq!(s.volume, 1.25);
     }
 
     #[test]
