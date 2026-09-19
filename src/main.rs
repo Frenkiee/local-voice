@@ -656,6 +656,20 @@ fn parse_speed(value: &str) -> Result<f32> {
     validate_speed(speed)
 }
 
+/// Parse a config value that must land inside `min..=max`, naming the key in
+/// both failure messages so the operator sees what they typed and what the
+/// bounds are.
+fn parse_in_range(value: &str, key: &str, min: f32, max: f32) -> Result<f32> {
+    let parsed: f32 = value
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid {key}: {value}"))?;
+    if !parsed.is_finite() || !(min..=max).contains(&parsed) {
+        bail!("Invalid {key} {value}: must be between {min} and {max}");
+    }
+    Ok(parsed)
+}
+
 fn validate_speed(speed: f32) -> Result<f32> {
     if !speed.is_finite() || speed <= 0.0 || speed > 10.0 {
         bail!("Invalid speed {speed}: must be between 0 (exclusive) and 10");
@@ -710,6 +724,16 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                 );
             } else {
                 println!("    ducking:    {}", "off".dimmed());
+            }
+            let output = config.output_settings();
+            println!("    volume:     {}", output.volume);
+            if output.normalize {
+                println!(
+                    "    normalize:  on (target {} dBFS, ceiling {} dBFS)",
+                    output.target_rms_db, output.peak_ceiling_db
+                );
+            } else {
+                println!("    normalize:  {}", "off".dimmed());
             }
             println!();
         }
@@ -804,6 +828,36 @@ fn handle_config(action: Option<ConfigAction>) -> Result<()> {
                         bail!("Invalid ducking fade {value}: must be at most 5000 ms");
                     }
                     config.ducking.get_or_insert_default().fade_ms = Some(fade_ms);
+                }
+                // Output loudness keys
+                "output.volume" => {
+                    let volume =
+                        parse_in_range(&value, "volume", config::MIN_VOLUME, config::MAX_VOLUME)?;
+                    config.output.get_or_insert_default().volume = Some(volume);
+                }
+                "output.normalize" => {
+                    let normalize = parse_bool(&value).ok_or_else(|| {
+                        anyhow::anyhow!("Invalid value '{value}': use on, off, true, false, 1, 0")
+                    })?;
+                    config.output.get_or_insert_default().normalize = Some(normalize);
+                }
+                "output.target_rms_db" => {
+                    let target = parse_in_range(
+                        &value,
+                        "target_rms_db",
+                        config::MIN_TARGET_RMS_DB,
+                        config::MAX_TARGET_RMS_DB,
+                    )?;
+                    config.output.get_or_insert_default().target_rms_db = Some(target);
+                }
+                "output.peak_ceiling_db" => {
+                    let ceiling = parse_in_range(
+                        &value,
+                        "peak_ceiling_db",
+                        config::MIN_PEAK_CEILING_DB,
+                        config::MAX_PEAK_CEILING_DB,
+                    )?;
+                    config.output.get_or_insert_default().peak_ceiling_db = Some(ceiling);
                 }
                 // Engine-specific keys
                 "kokoro.speed" => {
@@ -1210,4 +1264,75 @@ async fn interactive_mode() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `handle_config` reads and writes the operator's real config.toml, so the
+    // set arms are exercised through their validator rather than end to end.
+    #[test]
+    fn output_values_outside_their_range_are_refused() {
+        assert_eq!(
+            parse_in_range("1.5", "volume", config::MIN_VOLUME, config::MAX_VOLUME).unwrap(),
+            1.5
+        );
+        assert_eq!(
+            parse_in_range(
+                " -18 ",
+                "target_rms_db",
+                config::MIN_TARGET_RMS_DB,
+                config::MAX_TARGET_RMS_DB
+            )
+            .unwrap(),
+            -18.0
+        );
+
+        for bad in ["2.5", "-0.1", "loud", "", "NaN", "inf"] {
+            assert!(
+                parse_in_range(bad, "volume", config::MIN_VOLUME, config::MAX_VOLUME).is_err(),
+                "volume '{bad}' must be refused"
+            );
+        }
+        // The bounds themselves are valid.
+        assert!(parse_in_range("0", "volume", config::MIN_VOLUME, config::MAX_VOLUME).is_ok());
+        assert!(parse_in_range("2", "volume", config::MIN_VOLUME, config::MAX_VOLUME).is_ok());
+        assert!(
+            parse_in_range(
+                "-6",
+                "target_rms_db",
+                config::MIN_TARGET_RMS_DB,
+                config::MAX_TARGET_RMS_DB
+            )
+            .is_ok()
+        );
+        assert!(
+            parse_in_range(
+                "-41",
+                "target_rms_db",
+                config::MIN_TARGET_RMS_DB,
+                config::MAX_TARGET_RMS_DB
+            )
+            .is_err()
+        );
+        assert!(
+            parse_in_range(
+                "-13",
+                "peak_ceiling_db",
+                config::MIN_PEAK_CEILING_DB,
+                config::MAX_PEAK_CEILING_DB
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_error_message_names_the_key_and_the_bounds() {
+        let err = parse_in_range("9", "volume", config::MIN_VOLUME, config::MAX_VOLUME)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("volume"), "{err}");
+        assert!(err.contains('2'), "{err}");
+    }
 }

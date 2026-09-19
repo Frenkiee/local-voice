@@ -222,7 +222,11 @@ pub enum ConfigAction {
     Show,
 
     /// Set a configuration value
-    #[command(after_help = "\x1b[1mKeys:\x1b[0m
+    // `allow_negative_numbers` so a dB value reads as a value, not a flag:
+    // without it `config set output.target_rms_db -18` fails to parse.
+    #[command(
+        allow_negative_numbers = true,
+        after_help = "\x1b[1mKeys:\x1b[0m
   speed       Speech speed (routes to active engine)
   steps       Denoising steps (supertonic only)
   language    Language code (supertonic-2/3 only, e.g. en, sl, de)
@@ -247,7 +251,8 @@ pub enum ConfigAction {
   kokoro.default_voice    Kokoro default voice
   supertonic.speed        Supertonic speech speed
   supertonic.steps        Supertonic denoising steps
-  supertonic.language     Supertonic language code (default en)")]
+  supertonic.language     Supertonic language code (default en)"
+    )]
     Set {
         /// Config key
         key: String,
@@ -299,5 +304,25 @@ mod tests {
         };
         assert_eq!(volume, None);
         assert!(no_normalize, "--no-normalize must stand alone");
+    }
+
+    #[test]
+    fn config_set_accepts_a_negative_db_value() {
+        let cli = Cli::try_parse_from([
+            "local-voice",
+            "config",
+            "set",
+            "output.target_rms_db",
+            "-18",
+        ])
+        .unwrap();
+        let Some(Commands::Config {
+            action: Some(ConfigAction::Set { key, value }),
+        }) = cli.command
+        else {
+            panic!("expected config set");
+        };
+        assert_eq!(key, "output.target_rms_db");
+        assert_eq!(value, "-18", "a dB value must not be read as a flag");
     }
 }

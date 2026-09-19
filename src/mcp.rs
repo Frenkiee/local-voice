@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use crate::audio;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::engine::chatterbox::ChatterboxEngine;
 use crate::engine::kokoro::KokoroEngine;
 use crate::engine::piper::PiperEngine;
@@ -110,7 +110,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                 },
                 {
                     "name": "set_config",
-                    "description": "Configure TTS settings: engine, model, voice, speed, language (Supertonic 2/3), and audio ducking",
+                    "description": "Configure TTS settings: engine, model, voice, speed, language (Supertonic 2/3), audio ducking, and output loudness",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -141,6 +141,14 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                             "ducking_level": {
                                 "type": "number",
                                 "description": "Volume other apps are ducked to while speaking, 0..1 (default 0.1 = 10%)"
+                            },
+                            "volume": {
+                                "type": "number",
+                                "description": "Output volume for speech, 0..2 (default 1.0 = unchanged)"
+                            },
+                            "normalize": {
+                                "type": "boolean",
+                                "description": "Even out each utterance's loudness instead of playing the model's raw level (default true)"
                             }
                         },
                         "required": []
@@ -148,7 +156,7 @@ fn handle_tools_list(id: &Option<Value>) -> Value {
                 },
                 {
                     "name": "get_config",
-                    "description": "View current TTS configuration (engine, model, voice, speed, ducking)",
+                    "description": "View current TTS configuration (engine, model, voice, speed, ducking, output loudness)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},
@@ -415,10 +423,34 @@ fn handle_set_config(
         changes.push(format!("ducking_level={level}"));
     }
 
+    if let Some(volume) = args["volume"].as_f64() {
+        let volume = volume as f32;
+        if !volume.is_finite() || !(config::MIN_VOLUME..=config::MAX_VOLUME).contains(&volume) {
+            return tool_error(
+                id,
+                &format!(
+                    "Invalid volume {volume}: must be between {} and {}",
+                    config::MIN_VOLUME,
+                    config::MAX_VOLUME
+                ),
+            );
+        }
+        config.output.get_or_insert_default().volume = Some(volume);
+        changes.push(format!("volume={volume}"));
+    }
+
+    if let Some(normalize) = args["normalize"].as_bool() {
+        config.output.get_or_insert_default().normalize = Some(normalize);
+        changes.push(format!(
+            "normalize={}",
+            if normalize { "on" } else { "off" }
+        ));
+    }
+
     if changes.is_empty() {
         return tool_error(
             id,
-            "No config values provided. Set engine, model, voice, speed, language, ducking, or ducking_level.",
+            "No config values provided. Set engine, model, voice, speed, language, ducking, ducking_level, volume, or normalize.",
         );
     }
 
@@ -476,6 +508,17 @@ fn handle_get_config(id: &Option<Value>) -> Value {
         ));
     } else {
         lines.push("ducking: off".to_string());
+    }
+
+    let output = config.output_settings();
+    lines.push(format!("volume: {}", output.volume));
+    if output.normalize {
+        lines.push(format!(
+            "normalize: on (target {} dBFS, ceiling {} dBFS)",
+            output.target_rms_db, output.peak_ceiling_db
+        ));
+    } else {
+        lines.push("normalize: off".to_string());
     }
 
     tool_result(id, &lines.join("\n"))
@@ -697,4 +740,27 @@ fn tool_error(id: &Option<Value>, text: &str) -> Value {
         id,
         json!({ "content": [{ "type": "text", "text": text }], "isError": true }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `handle_set_config` reads and writes the operator's real config.toml,
+    /// so what is pinned here is the advertised surface: an agent can only
+    /// send a key the schema names.
+    #[test]
+    fn set_config_advertises_the_output_loudness_keys() {
+        let tools = handle_tools_list(&Some(json!(1)));
+        let set_config = tools["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .find(|t| t["name"] == "set_config")
+            .expect("set_config tool");
+
+        let props = &set_config["inputSchema"]["properties"];
+        assert_eq!(props["volume"]["type"], "number");
+        assert_eq!(props["normalize"]["type"], "boolean");
+    }
 }
