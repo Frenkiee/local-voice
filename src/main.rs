@@ -5,6 +5,7 @@ mod download;
 mod ducking;
 mod engine;
 mod hardware;
+mod loudness;
 mod mcp;
 mod phonemize;
 mod playback_lock;
