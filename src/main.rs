@@ -478,6 +478,8 @@ fn handle_speak(
         ducking_settings.level = level;
     }
 
+    let loudness_settings = config.output_settings();
+
     let engine_kind = match engine_name {
         Some(e) => e.parse::<engine::EngineKind>()?,
         None => {
@@ -590,7 +592,8 @@ fn handle_speak(
         }
     };
 
-    let audio_output = tts.synthesize(text)?;
+    let mut audio_output = tts.synthesize(text)?;
+    audio::level_output(&mut audio_output, &loudness_settings);
 
     if let Some(path) = output {
         audio::save_wav(&audio_output, path)?;

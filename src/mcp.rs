@@ -262,7 +262,8 @@ fn handle_speak(
     let eng = engines.get_mut(&cache_key).unwrap();
 
     match eng.synthesize(text) {
-        Ok(audio_output) => {
+        Ok(mut audio_output) => {
+            audio::level_output(&mut audio_output, &config.output_settings());
             audio_queue.enqueue(audio_output);
             tool_result(id, &format!("Spoke text using {engine_kind} engine"))
         }
@@ -304,7 +305,10 @@ fn handle_speak_async(
             }
         };
         match engine.synthesize(&text) {
-            Ok(audio) => Some(audio),
+            Ok(mut audio) => {
+                audio::level_output(&mut audio, &config.output_settings());
+                Some(audio)
+            }
             Err(e) => {
                 eprintln!("[local-voice] speak_async synthesis failed: {e}");
                 None

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::num::NonZero;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,6 +9,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::ducking::{self, DuckingSettings};
 use crate::engine::AudioOutput;
+use crate::loudness::{self, LoudnessSettings};
 use crate::playback_lock::{self, PlaybackSlot};
 
 /// How long the background queue keeps other apps ducked after an item
@@ -28,6 +30,34 @@ const DRAIN_POLL: Duration = Duration::from_millis(10);
 pub fn audio_duration(audio: &AudioOutput) -> Duration {
     let frames = audio.samples.len() as u64 / u64::from(audio.channels.max(1));
     Duration::from_secs_f64(frames as f64 / f64::from(audio.sample_rate.max(1)))
+}
+
+// ─── Output loudness ─────────────────────────────────────────────────────────
+
+fn debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LOCAL_VOICE_DEBUG").is_some_and(|v| v == "1"))
+}
+
+/// Bring freshly synthesized `audio` to the operator's output level.
+///
+/// This is the only gain stage in the process, and every caller runs it the
+/// moment `synthesize` returns — before [`save_wav`] and before playback — so
+/// a `--output` WAV file holds exactly what the speaker played. Its report is
+/// logged under `LOCAL_VOICE_DEBUG=1`.
+pub fn level_output(audio: &mut AudioOutput, settings: &LoudnessSettings) {
+    let report = loudness::apply(&mut audio.samples, settings);
+    if debug_enabled() {
+        let clipping = if report.clipped_samples > 0 {
+            format!(", {} sample(s) clipped", report.clipped_samples)
+        } else {
+            String::new()
+        };
+        eprintln!(
+            "[local-voice] loudness: peak {:.1} dBFS, rms {:.1} dBFS -> gain {:+.1} dB{clipping}",
+            report.peak_before_db, report.rms_before_db, report.gain_db,
+        );
+    }
 }
 
 /// Open the *current* default output device.
