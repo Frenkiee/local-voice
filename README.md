@@ -174,6 +174,7 @@ local-voice config set engine kokoro       # switch engine
 local-voice config set voice af_alloy      # switch voice (auto-sets engine)
 local-voice config set model kokoro-q8f16  # switch model (auto-sets engine)
 local-voice config set ducking off         # stop lowering other apps' audio while speaking
+local-voice config set output.volume 1.5   # make speech louder (0..2)
 local-voice config paths                   # show config + model file locations
 local-voice config auto-detect             # pick best engine for your hardware
 ```
@@ -213,6 +214,32 @@ Platform notes:
 - **Windows** — per-app volume via WASAPI audio sessions; no permissions needed.
 - **Linux** — uses `pactl` to adjust per-stream volume (PulseAudio or PipeWire with
   `pipewire-pulse`). Without `pactl` on `PATH`, speech plays without ducking.
+
+### Output loudness
+
+TTS models return raw tensors at whatever level they happen to produce, which is usually
+quieter than everything else on the machine and varies by engine, by voice and even by
+sentence. local-voice measures each utterance and brings it to a target loudness before it
+reaches the speaker — a quiet model is boosted, a hot one is attenuated, and a peak ceiling
+keeps a single loud transient from dragging the rest down to a whisper. Normalization is
+**on by default**. On top of it sits your own output volume.
+
+```bash
+local-voice config set output.volume 1.5          # 0..2 — 1.0 leaves the level alone, 2.0 is +6 dB
+local-voice config set output.normalize off       # play the model's raw level (on|off|true|false|1|0)
+local-voice config set output.target_rms_db -18   # loudness utterances are brought to, -40..-6 (default -20)
+local-voice config set output.peak_ceiling_db -1  # headroom kept, -12..0 (default -1)
+local-voice speak "Hi" --volume 1.5               # louder for a single run
+local-voice speak "Hi" --no-normalize             # raw model level for a single run
+```
+
+Over MCP, `set_config` takes `volume` (0..2) and `normalize` (boolean), and `get_config`
+reports both. The gain runs before the audio is played *and* before `--output` writes a WAV
+file, so the file holds exactly what was played. `LOCAL_VOICE_DEBUG=1` prints the measured
+peak, RMS and applied gain per utterance.
+
+These settings live in this machine's `config.toml` — the right volume for a laptop speaker
+is not the right volume for studio monitors, so each machine keeps its own.
 
 ### Interactive mode
 
@@ -284,7 +311,7 @@ If you installed from a release binary, add this config manually:
 | Tool | Description |
 |------|-------------|
 | `speak` | Speak text aloud — returns immediately, audio queued in background. Other apps' audio is ducked while speaking |
-| `set_config` | Change engine, model, voice, or speed; `ducking` (boolean) and `ducking_level` (0..1) control audio ducking |
+| `set_config` | Change engine, model, voice, or speed; `ducking` (boolean) and `ducking_level` (0..1) control audio ducking; `volume` (0..2) and `normalize` (boolean) control output loudness |
 | `get_config` | View current TTS configuration |
 | `list_engines` | List available TTS engines |
 | `list_models` | List available and installed models |
@@ -442,7 +469,8 @@ src/
   cli.rs               Clap command definitions with rich help
   config.rs            TOML config management (~/.config/local-voice/config.toml)
   mcp.rs               MCP server (JSON-RPC over stdio, audio queue)
-  audio.rs             Audio playback (rodio), WAV saving, AudioQueue
+  audio.rs             Audio playback (rodio), WAV saving, AudioQueue, output gain stage
+  loudness.rs          Per-utterance normalization + output volume (pure)
   ducking/
     mod.rs             DuckingSettings, duck() + RAII DuckGuard, Ducker trait
     macos.rs           Core Audio process-tap backend (macOS 14.2+)
