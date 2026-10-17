@@ -185,24 +185,52 @@ fn pid_alive(_pid: u32) -> bool {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    /// The queue directory is process-global and these tests drive the real
+    /// one: run in parallel they sweep each other's tickets and flake, so
+    /// every test that calls `acquire` takes turns behind this lock.
+    static QUEUE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn queue_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        QUEUE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn slots_are_served_in_arrival_order() {
+        let _lock = queue_test_lock();
         let order = Arc::new(Mutex::new(Vec::new()));
         // Hold the head so the others queue up behind it.
         let first = acquire().expect("queue usable");
+        let dir = queue_dir();
         let mut handles = Vec::new();
         for i in 0..3 {
             let order = Arc::clone(&order);
             handles.push(thread::spawn(move || {
-                // Stagger arrivals so ticket timestamps are strictly ordered.
-                thread::sleep(Duration::from_millis(30 * i as u64));
                 let _slot = acquire().expect("queue usable");
                 order.lock().unwrap().push(i);
                 thread::sleep(Duration::from_millis(40));
             }));
+            // Wait for this thread's ticket to exist before spawning the
+            // next. Arrival stamps are the queue's ordering contract, and
+            // macOS coalesces short sleep wakeups (tens of ms when idle), so
+            // a sleep-based stagger can stamp later threads first and let
+            // them legitimately be served first. Polling the tickets makes
+            // arrival order deterministic without relying on sleep timing.
+            let expect_tickets = i as usize + 2; // `first` + one per thread
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let n = fs::read_dir(&dir).map(|rd| rd.count()).unwrap_or(0);
+                if n >= expect_tickets || Instant::now() > deadline {
+                    assert!(
+                        n >= expect_tickets,
+                        "thread {i} never got its ticket into the queue"
+                    );
+                    break;
+                }
+                thread::sleep(POLL);
+            }
         }
-        thread::sleep(Duration::from_millis(150));
         assert!(
             order.lock().unwrap().is_empty(),
             "nobody may play while the head is held"
@@ -216,6 +244,7 @@ mod tests {
 
     #[test]
     fn dead_process_tickets_are_skipped() {
+        let _lock = queue_test_lock();
         let dir = queue_dir();
         fs::create_dir_all(&dir).unwrap();
         // A ticket that sorts first but belongs to a pid that cannot exist.
@@ -228,6 +257,7 @@ mod tests {
 
     #[test]
     fn expired_ticket_of_live_process_is_skipped() {
+        let _lock = queue_test_lock();
         let dir = queue_dir();
         fs::create_dir_all(&dir).unwrap();
         // Our own pid is certainly alive, but the promised deadline is long
@@ -241,6 +271,7 @@ mod tests {
 
     #[test]
     fn promised_deadline_in_future_is_honoured() {
+        let _lock = queue_test_lock();
         let dir = queue_dir();
         fs::create_dir_all(&dir).unwrap();
         let slot = acquire().expect("queue usable");
