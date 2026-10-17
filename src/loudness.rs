@@ -27,9 +27,13 @@ pub struct LoudnessSettings {
     /// Loudness every utterance is brought to, in dBFS RMS.
     pub target_rms_db: f32,
     /// Normalization never pushes the loudest sample above this, in dBFS.
+    /// While normalization is on this is an absolute ceiling: it bounds the
+    /// total gain, so `volume` is absorbed into it rather than clipping.
     pub peak_ceiling_db: f32,
     /// The operator's own output volume, applied after normalization.
-    /// 1.0 leaves the level alone; 2.0 is +6 dB and may clip.
+    /// 1.0 leaves the level alone. With normalization on the peak ceiling
+    /// caps the combined gain, so loud utterances absorb the volume instead
+    /// of clipping; with `normalize: false` it is raw gain and may clip.
     pub volume: f32,
 }
 
@@ -64,15 +68,18 @@ pub struct LoudnessReport {
 /// smaller of "reach the RMS target" and "keep the peak under the ceiling",
 /// so a hot model is attenuated just as a quiet one is boosted, and a single
 /// spike cannot drag the whole utterance down to a whisper. `volume`
-/// multiplies on top, which is the only way the result can clip — those
-/// samples are clamped and counted.
+/// multiplies on top, but while normalizing the peak ceiling bounds the
+/// *total* gain: an emphasised volume is absorbed on loud passages instead of
+/// running past full scale. Clamping (counted in the report) then remains a
+/// backstop only reachable with `normalize: false` and a volume above 1.
 ///
 /// Channel layout does not matter: interleaved frames take the same gain as
 /// mono, so the stereo image is untouched.
 pub fn apply(samples: &mut [f32], settings: &LoudnessSettings) -> LoudnessReport {
     let (peak, rms) = measure(samples);
 
-    let normalization = if settings.normalize && peak >= SILENCE_FLOOR && rms > 0.0 {
+    let measured = settings.normalize && peak >= SILENCE_FLOOR && rms > 0.0;
+    let normalization = if measured {
         let to_target = db_to_linear(settings.target_rms_db) / rms;
         let under_ceiling = db_to_linear(settings.peak_ceiling_db) / peak;
         to_target.min(under_ceiling)
@@ -80,7 +87,15 @@ pub fn apply(samples: &mut [f32], settings: &LoudnessSettings) -> LoudnessReport
         1.0
     };
 
-    let gain = normalization * settings.volume;
+    let mut gain = normalization * settings.volume;
+    if measured {
+        // The ceiling bounds the total gain, not just the normalization part.
+        // Without this the volume multiplier is applied past the ceiling and
+        // the clamp below flattens loud syllables into hard-clipped plateaus
+        // — audible crackle on every stressed word.
+        let under_ceiling = db_to_linear(settings.peak_ceiling_db) / peak;
+        gain = gain.min(under_ceiling);
+    }
 
     let mut clipped_samples = 0;
     if gain != 1.0 {
@@ -306,6 +321,61 @@ mod tests {
         );
 
         assert!((rms_of(&louder) - rms_of(&once) * 1.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn volume_cannot_push_a_hot_utterance_past_the_ceiling() {
+        // Regression: the September 2026 loudness stage multiplied `volume`
+        // on top of a ceiling-bound normalization, so `volume: 1.4` pushed
+        // stressed syllables past full scale and the hard clamp crackled.
+        // The volume must be absorbed by the ceiling instead.
+        //
+        // Speech-like crest factor (quiet body, loud stressed peaks, like the
+        // measured -25.9 dBFS RMS / -7.9 dBFS peak real utterances produce):
+        // normalization alone lands the peaks on the ceiling, and ×1.4 used
+        // to put them a full dB above it.
+        let settings = LoudnessSettings {
+            volume: 1.4,
+            ..Default::default()
+        };
+        let mut speech = sine(0.002, 24_000);
+        for i in (0..24_000).step_by(2_400) {
+            speech[i] = 0.7;
+        }
+        let report = apply(&mut speech, &settings);
+        let ceiling = db_to_linear(settings.peak_ceiling_db);
+        assert_eq!(
+            report.clipped_samples, 0,
+            "must never clip while normalizing"
+        );
+        assert!(
+            (peak_of(&speech) - ceiling).abs() < ceiling * 0.01,
+            "expected peak ≈ {ceiling}, got {}",
+            peak_of(&speech)
+        );
+    }
+
+    #[test]
+    fn volume_still_lifts_signal_that_has_headroom() {
+        // Absorption must only happen where the ceiling binds. A hot sine's
+        // gain is bound by the RMS target, not the ceiling, so ×1.4 simply
+        // makes it louder — and still cannot clip.
+        let plain = LoudnessSettings::default();
+        let emphasised = LoudnessSettings {
+            volume: 1.4,
+            ..Default::default()
+        };
+        let mut a = sine(0.99, 24_000);
+        let mut b = sine(0.99, 24_000);
+        apply(&mut a, &plain);
+        let report = apply(&mut b, &emphasised);
+
+        assert_eq!(report.clipped_samples, 0);
+        assert!(
+            peak_of(&b) > peak_of(&a),
+            "volume must still make headroom-bound signals louder"
+        );
+        assert!(peak_of(&b) <= db_to_linear(emphasised.peak_ceiling_db) * 1.001);
     }
 
     #[test]

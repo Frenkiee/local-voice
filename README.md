@@ -222,7 +222,8 @@ quieter than everything else on the machine and varies by engine, by voice and e
 sentence. local-voice measures each utterance and brings it to a target loudness before it
 reaches the speaker — a quiet model is boosted, a hot one is attenuated, and a peak ceiling
 keeps a single loud transient from dragging the rest down to a whisper. Normalization is
-**on by default**. On top of it sits your own output volume.
+**on by default**. On top of it sits your own output volume; while normalization is on, the
+peak ceiling bounds the *total* gain, so loud passages absorb the volume instead of clipping.
 
 ```bash
 local-voice config set output.volume 1.5          # 0..2 — 1.0 leaves the level alone, 2.0 is +6 dB
